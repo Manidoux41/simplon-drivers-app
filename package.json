@@ -8,7 +8,13 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "lint": "expo lint"
+    "lint": "expo lint",
+    "build:development": "eas build --platform all --profile development",
+    "maps:enable": "npm run maps:backup && npm run maps:activate",
+    "maps:disable": "npm run maps:backup && npm run maps:restore-simple",
+    "maps:backup": "cp app/admin/create-mission.tsx app/admin/create-mission-backup.tsx 2>/dev/null || true",
+    "maps:activate": "mv app/admin/create-mission-simple.tsx app/admin/create-mission-simple-backup.tsx 2>/dev/null || true && mv app/admin/create-mission-maps.tsx app/admin/create-mission.tsx 2>/dev/null || true",
+    "maps:restore-simple": "mv app/admin/create-mission.tsx app/admin/create-mission-maps.tsx 2>/dev/null || true && mv app/admin/create-mission-simple.tsx app/admin/create-mission.tsx 2>/dev/null || true"
   },
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
@@ -17,6 +23,7 @@
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
     "@types/date-fns": "^2.5.3",
+    "@types/react-native-maps": "^0.24.1",
     "date-fns": "^4.1.0",
     "expo": "~53.0.20",
     "expo-blur": "~14.1.5",
@@ -39,12 +46,14 @@
     "react-dom": "19.0.0",
     "react-native": "0.79.5",
     "react-native-gesture-handler": "~2.24.0",
+    "react-native-maps": "1.20.1",
     "react-native-paper": "^5.14.5",
     "react-native-reanimated": "~3.17.4",
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.11.1",
     "react-native-web": "~0.20.0",
-    "react-native-webview": "13.13.5"
+    "react-native-webview": "13.13.5",
+    "expo-maps": "~0.11.0"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

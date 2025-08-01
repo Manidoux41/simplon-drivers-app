@@ -89,9 +89,11 @@ export default function TestFrenchAPIScreen() {
     '41170', // Code postal de Mondoubleau
     'Prunay-Cassereau',
     'Saint-Amand-Longpré',
-    'La Ville-aux-Clercs',
+    'La Ville-aux-Clercs', // Test spécifique
     'École maternelle Mer',
     'Beauce la Romaine',
+    'Auxant', // Pour comparer avec le résultat précédent
+    'Ville-aux-Clercs', // Sans l'article
     'Adresse inexistante 99999',
   ];
 

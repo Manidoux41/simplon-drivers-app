@@ -55,8 +55,8 @@ export class FrenchCityAPI {
       
       console.log('🌍 Recherche API gouv.fr pour:', cityName);
       
-      // Recherche par nom de commune
-      const searchUrl = `${this.BASE_URL}/communes?nom=${encodeURIComponent(cityName)}&fields=nom,code,codesPostaux,centre,population&format=json&geometry=centre`;
+      // Recherche par nom de commune avec boost pour correspondance exacte
+      const searchUrl = `${this.BASE_URL}/communes?nom=${encodeURIComponent(cityName)}&fields=nom,code,codesPostaux,centre,population&format=json&geometry=centre&boost=population`;
       
       const response = await fetch(searchUrl);
       
@@ -68,26 +68,36 @@ export class FrenchCityAPI {
       const communes = await response.json();
       
       if (communes && communes.length > 0) {
-        // Prendre la première commune (plus peuplée généralement)
-        const commune = communes[0];
+        // Chercher d'abord une correspondance exacte (insensible à la casse)
+        let bestCommune = communes.find((c: any) => 
+          c.nom.toLowerCase() === cityName.toLowerCase()
+        );
         
-        if (commune.centre && commune.centre.coordinates) {
-          const [longitude, latitude] = commune.centre.coordinates;
+        // Si pas de correspondance exacte, prendre la première (plus peuplée)
+        if (!bestCommune) {
+          bestCommune = communes[0];
+          console.log(`📍 Correspondance approximative: "${cityName}" → "${bestCommune.nom}"`);
+        } else {
+          console.log(`📍 Correspondance exacte: "${cityName}" = "${bestCommune.nom}"`);
+        }
+        
+        if (bestCommune.centre && bestCommune.centre.coordinates) {
+          const [longitude, latitude] = bestCommune.centre.coordinates;
           
           const result: FrenchCityResult = {
             latitude,
             longitude,
-            address: `${cityName} (${commune.nom})`,
-            isApproximate: true,
-            cityName: commune.nom,
-            postalCode: commune.codesPostaux?.[0],
-            population: commune.population,
+            address: `${cityName} (${bestCommune.nom})`,
+            isApproximate: bestCommune.nom.toLowerCase() !== cityName.toLowerCase(),
+            cityName: bestCommune.nom,
+            postalCode: bestCommune.codesPostaux?.[0],
+            population: bestCommune.population,
           };
 
           // Mettre en cache
           this.cityCache.set(normalizedCityName, result);
           
-          console.log(`✅ Ville trouvée: ${commune.nom} (${latitude}, ${longitude}) - ${commune.population} hab.`);
+          console.log(`✅ Ville trouvée: ${bestCommune.nom} (${latitude}, ${longitude}) - ${bestCommune.population} hab.`);
           return result;
         }
       }

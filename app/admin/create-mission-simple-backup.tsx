@@ -18,11 +18,100 @@ import { useDriversWithNotification } from '../../hooks/useDrivers';
 import { Button } from '../../components/ui/Button';
 import { Header } from '../../components/ui/Header';
 import { PhoneButton } from '../../components/ui/PhoneButton';
-import { AddressPickerWithMap, AddressPickerResult } from '../../components/AddressPickerWithMap';
-import { IntegratedRouteMap } from '../../components/IntegratedRouteMap';
 import { databaseService, Mission } from '../../lib/database';
-import { RouteCalculationService, RouteResult } from '../../services/RouteCalculationService';
+import { GeocodingService } from '../../services/GeocodingService';
 import { parseDateTime, addMinutes, validateDateBounds, formatDateTime } from '../../utils/dateHelpers';
+
+// Interface simplifiée pour la sélection d'adresse
+interface SimpleAddressResult {
+  address: string;
+  latitude: number;
+  longitude: number;
+}
+
+const SimpleAddressPicker = ({ 
+  visible, 
+  onClose, 
+  onAddressSelected, 
+  title, 
+  placeholder,
+  initialAddress 
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onAddressSelected: (result: SimpleAddressResult) => void;
+  title: string;
+  placeholder: string;
+  initialAddress?: string;
+}) => {
+  const [searchText, setSearchText] = useState(initialAddress || '');
+  const [loading, setLoading] = useState(false);
+
+  const handleConfirm = async () => {
+    if (!searchText.trim()) {
+      Alert.alert('Erreur', 'Veuillez saisir une adresse');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const result = await GeocodingService.geocodeAddress(searchText);
+      if (result) {
+        onAddressSelected({
+          address: result.address,
+          latitude: result.latitude,
+          longitude: result.longitude
+        });
+        onClose();
+      } else {
+        Alert.alert('Erreur', 'Adresse non trouvée');
+      }
+    } catch (error: any) {
+      Alert.alert('Erreur', error.message || 'Erreur de géocodage');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
+      <View style={styles.modalContainer}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>{title}</Text>
+          <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+            <Ionicons name="close" size={24} color="#666" />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.modalContent}>
+          <TextInput
+            style={styles.searchInput}
+            value={searchText}
+            onChangeText={setSearchText}
+            placeholder={placeholder}
+            autoFocus
+          />
+          
+          <View style={styles.modalActions}>
+            <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
+              <Text style={styles.cancelButtonText}>Annuler</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.confirmButton, loading && styles.disabledButton]}
+              onPress={handleConfirm}
+              disabled={loading}
+            >
+              <Text style={styles.confirmButtonText}>
+                {loading ? 'Recherche...' : 'Confirmer'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+};
 
 export default function CreateMissionScreen() {
   const router = useRouter();
@@ -46,9 +135,6 @@ export default function CreateMissionScreen() {
   // Coordonnées des adresses
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [destinationCoords, setDestinationCoords] = useState<{ latitude: number; longitude: number } | null>(null);
-  
-  // Itinéraire calculé
-  const [calculatedRoute, setCalculatedRoute] = useState<RouteResult | null>(null);
 
   // États des modals
   const [showPickupPicker, setShowPickupPicker] = useState(false);
@@ -58,7 +144,7 @@ export default function CreateMissionScreen() {
   const [creating, setCreating] = useState(false);
 
   // Gestion de la sélection d'adresse de départ
-  const handlePickupSelected = (result: AddressPickerResult) => {
+  const handlePickupSelected = (result: SimpleAddressResult) => {
     setMissionForm(prev => ({
       ...prev,
       pickupLocation: result.address
@@ -67,11 +153,10 @@ export default function CreateMissionScreen() {
       latitude: result.latitude,
       longitude: result.longitude
     });
-    setShowPickupPicker(false);
   };
 
   // Gestion de la sélection d'adresse de destination
-  const handleDestinationSelected = (result: AddressPickerResult) => {
+  const handleDestinationSelected = (result: SimpleAddressResult) => {
     setMissionForm(prev => ({
       ...prev,
       destination: result.address
@@ -80,12 +165,6 @@ export default function CreateMissionScreen() {
       latitude: result.latitude,
       longitude: result.longitude
     });
-    setShowDestinationPicker(false);
-  };
-
-  // Callback quand l'itinéraire est calculé
-  const handleRouteCalculated = (route: RouteResult) => {
-    setCalculatedRoute(route);
   };
 
   // Validation du formulaire
@@ -146,25 +225,16 @@ export default function CreateMissionScreen() {
       const finalPickupCoords = pickupCoords || { latitude: 48.8566, longitude: 2.3522 };
       const finalDestinationCoords = destinationCoords || { latitude: 48.8566, longitude: 2.3522 };
 
-      // Calculer la distance à partir de l'itinéraire ou distance directe
-      let distance = 0;
-      let estimatedDurationMinutes = 60;
-
-      if (calculatedRoute) {
-        distance = calculatedRoute.distance;
-        estimatedDurationMinutes = calculatedRoute.duration;
-      } else {
-        // Calcul distance directe si pas d'itinéraire
-        const dx = finalDestinationCoords.latitude - finalPickupCoords.latitude;
-        const dy = finalDestinationCoords.longitude - finalPickupCoords.longitude;
-        distance = Math.sqrt(dx * dx + dy * dy) * 111.32; // Approximation en km
-        estimatedDurationMinutes = Math.max(30, Math.round((distance / 50) * 60));
-      }
+      // Calcul distance approximatif
+      const dx = finalDestinationCoords.latitude - finalPickupCoords.latitude;
+      const dy = finalDestinationCoords.longitude - finalPickupCoords.longitude;
+      const distance = Math.sqrt(dx * dx + dy * dy) * 111.32; // Approximation en km
+      const estimatedDurationMinutes = Math.max(30, Math.round((distance / 50) * 60));
 
       const estimatedEndTime = addMinutes(datetime, estimatedDurationMinutes);
 
       const missionData: Mission = {
-        id: Date.now().toString(), // Génération d'ID simple
+        id: Date.now().toString(),
         title: missionForm.title.trim(),
         description: missionForm.description.trim(),
         status: 'PENDING',
@@ -183,7 +253,7 @@ export default function CreateMissionScreen() {
         maxPassengers: parseInt(missionForm.passengerCount),
         currentPassengers: 0,
         driverId: missionForm.driverId,
-        companyId: '1', // ID company par défaut
+        companyId: '1',
         vehicleId: missionForm.vehicleId,
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
@@ -256,11 +326,10 @@ export default function CreateMissionScreen() {
           </View>
         </View>
 
-        {/* Adresses et itinéraire */}
+        {/* Adresses */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Itinéraire</Text>
           
-          {/* Adresse de départ */}
           <View style={styles.formGroup}>
             <Text style={styles.label}>Adresse de départ *</Text>
             <TouchableOpacity
@@ -278,7 +347,6 @@ export default function CreateMissionScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Adresse de destination */}
           <View style={styles.formGroup}>
             <Text style={styles.label}>Adresse de destination *</Text>
             <TouchableOpacity
@@ -296,18 +364,17 @@ export default function CreateMissionScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Aperçu de l'itinéraire */}
+          {/* Info distance si coordonnées disponibles */}
           {pickupCoords && destinationCoords && (
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Aperçu de l'itinéraire</Text>
-              <IntegratedRouteMap
-                startPoint={pickupCoords}
-                endPoint={destinationCoords}
-                startAddress={missionForm.pickupLocation}
-                endAddress={missionForm.destination}
-                onRouteCalculated={handleRouteCalculated}
-                style={styles.routeMap}
-              />
+            <View style={styles.routeInfo}>
+              <Text style={styles.routeInfoText}>
+                📍 Distance estimée: {
+                  Math.sqrt(
+                    Math.pow(destinationCoords.latitude - pickupCoords.latitude, 2) +
+                    Math.pow(destinationCoords.longitude - pickupCoords.longitude, 2)
+                  ) * 111.32
+                }.toFixed(1) km
+              </Text>
             </View>
           )}
         </View>
@@ -343,33 +410,8 @@ export default function CreateMissionScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Assignation</Text>
           
-          {/* Sélection du conducteur */}
           <View style={styles.formGroup}>
             <Text style={styles.label}>Conducteur *</Text>
-            <View style={styles.pickerContainer}>
-              <Ionicons name="person" size={20} color={Colors.light.primary} />
-              <View style={styles.pickerContent}>
-                {missionForm.driverId ? (
-                  (() => {
-                    const selectedDriver = drivers.find(d => d.id.toString() === missionForm.driverId);
-                    return selectedDriver ? (
-                      <View style={styles.selectedDriverContainer}>
-                        <Text style={styles.selectedDriverName}>
-                          {selectedDriver.firstName} {selectedDriver.lastName}
-                        </Text>
-                        <PhoneButton 
-                          phoneNumber={selectedDriver.phoneNumber || '0000000000'} 
-                          size={16} 
-                        />
-                      </View>
-                    ) : null;
-                  })()
-                ) : (
-                  <Text style={styles.pickerPlaceholder}>Sélectionner un conducteur</Text>
-                )}
-              </View>
-            </View>
-            
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.driversList}>
               {drivers.map((driver) => (
                 <TouchableOpacity
@@ -395,7 +437,6 @@ export default function CreateMissionScreen() {
             </ScrollView>
           </View>
 
-          {/* Sélection du véhicule */}
           <View style={styles.formGroup}>
             <Text style={styles.label}>Véhicule *</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.vehiclesList}>
@@ -450,29 +491,24 @@ export default function CreateMissionScreen() {
         </View>
       </ScrollView>
 
-      {/* Modal sélection adresse de départ */}
-      <Modal visible={showPickupPicker} animationType="slide" presentationStyle="pageSheet">
-        <AddressPickerWithMap
-          title="Adresse de départ"
-          placeholder="Rechercher l'adresse de départ..."
-          onAddressSelected={handlePickupSelected}
-          onCancel={() => setShowPickupPicker(false)}
-          initialAddress={missionForm.pickupLocation}
-          initialCoordinates={pickupCoords || undefined}
-        />
-      </Modal>
+      {/* Modals sélection adresses */}
+      <SimpleAddressPicker
+        visible={showPickupPicker}
+        title="Adresse de départ"
+        placeholder="Rechercher l'adresse de départ..."
+        onAddressSelected={handlePickupSelected}
+        onClose={() => setShowPickupPicker(false)}
+        initialAddress={missionForm.pickupLocation}
+      />
 
-      {/* Modal sélection adresse de destination */}
-      <Modal visible={showDestinationPicker} animationType="slide" presentationStyle="pageSheet">
-        <AddressPickerWithMap
-          title="Adresse de destination"
-          placeholder="Rechercher l'adresse de destination..."
-          onAddressSelected={handleDestinationSelected}
-          onCancel={() => setShowDestinationPicker(false)}
-          initialAddress={missionForm.destination}
-          initialCoordinates={destinationCoords || undefined}
-        />
-      </Modal>
+      <SimpleAddressPicker
+        visible={showDestinationPicker}
+        title="Adresse de destination"
+        placeholder="Rechercher l'adresse de destination..."
+        onAddressSelected={handleDestinationSelected}
+        onClose={() => setShowDestinationPicker(false)}
+        initialAddress={missionForm.destination}
+      />
     </View>
   );
 }
@@ -544,37 +580,16 @@ const styles = StyleSheet.create({
   placeholderText: {
     color: '#999',
   },
-  routeMap: {
-    height: 200,
+  routeInfo: {
+    backgroundColor: '#f8f9fa',
+    borderRadius: 8,
+    padding: 12,
     marginTop: 8,
   },
-  pickerContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#e1e5e9',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-    gap: 8,
-  },
-  pickerContent: {
-    flex: 1,
-  },
-  pickerPlaceholder: {
-    fontSize: 16,
-    color: '#999',
-  },
-  selectedDriverContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  selectedDriverName: {
-    fontSize: 16,
-    color: '#333',
-    fontWeight: '500',
+  routeInfoText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
   },
   driversList: {
     marginTop: 8,
@@ -642,5 +657,71 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 16,
+  },
+  // Modal styles
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#e9ecef',
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  searchInput: {
+    borderWidth: 1,
+    borderColor: '#e1e5e9',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    fontSize: 16,
+    backgroundColor: '#fff',
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  cancelButton: {
+    flex: 1,
+    backgroundColor: '#6c757d',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  confirmButton: {
+    flex: 1,
+    backgroundColor: Colors.light.primary,
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  confirmButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  disabledButton: {
+    backgroundColor: '#dee2e6',
   },
 });
