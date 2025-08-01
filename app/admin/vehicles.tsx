@@ -157,6 +157,13 @@ export default function VehiclesManagement() {
         
         <View style={styles.rightButtons}>
           <TouchableOpacity 
+            onPress={() => router.push('/admin/test-geocoding' as any)}
+            style={styles.testButton}
+          >
+            <Ionicons name="location" size={20} color="#8b5cf6" />
+            <Text style={[styles.testText, { color: '#8b5cf6' }]}>Test Géocodage</Text>
+          </TouchableOpacity>
+          <TouchableOpacity 
             onPress={() => router.push('/admin/map-test' as any)}
             style={styles.testButton}
           >

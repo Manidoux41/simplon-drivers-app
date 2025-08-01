@@ -30,16 +30,32 @@ export class GeocodingService {
   }
 
   /**
-   * Fallback intelligent utilisant la base de données de villes
+   * Fallback intelligent utilisant l'API complète des villes françaises
    */
-  private static createFallbackResult(address: string): GeocodingResult {
-    const result = SimpleCityGeocoding.intelligentGeocode(address);
-    return {
-      latitude: result.latitude,
-      longitude: result.longitude,
-      address: result.address,
-      isApproximate: result.isApproximate,
-    };
+  private static async createFallbackResult(address: string): Promise<GeocodingResult> {
+    console.log('🔄 Recherche fallback intelligente pour:', address);
+    
+    try {
+      // Utiliser la nouvelle API avec couverture complète
+      const result = await SimpleCityGeocoding.intelligentGeocodeWithAPI(address);
+      return {
+        latitude: result.latitude,
+        longitude: result.longitude,
+        address: result.address,
+        isApproximate: result.isApproximate,
+      };
+    } catch (error) {
+      console.warn('⚠️ Erreur fallback API:', error);
+      
+      // Fallback ultime vers la base locale
+      const localResult = SimpleCityGeocoding.intelligentGeocode(address);
+      return {
+        latitude: localResult.latitude,
+        longitude: localResult.longitude,
+        address: localResult.address,
+        isApproximate: localResult.isApproximate,
+      };
+    }
   }
 
   /**
@@ -83,7 +99,7 @@ export class GeocodingService {
         return geocodingResult;
       } else {
         console.warn('⚠️ Aucun résultat trouvé pour:', trimmedAddress);
-        return this.createFallbackResult(trimmedAddress);
+        return await this.createFallbackResult(trimmedAddress);
       }
     } catch (error) {
       console.error('❌ Erreur géocodage:', error);
@@ -91,11 +107,11 @@ export class GeocodingService {
       // Si c'est une erreur de limite, utiliser le fallback intelligent
       if (error instanceof Error && error.message.includes('rate limit')) {
         console.warn('⚠️ Limite de géocodage atteinte, utilisation du fallback');
-        return this.createFallbackResult(trimmedAddress);
+        return await this.createFallbackResult(trimmedAddress);
       }
       
       // Pour les autres erreurs, utiliser aussi le fallback
-      return this.createFallbackResult(trimmedAddress);
+      return await this.createFallbackResult(trimmedAddress);
     }
   }
 

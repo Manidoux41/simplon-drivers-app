@@ -57,6 +57,14 @@ export default function AdminDashboard() {
       route: '/admin/test-geocoding',
     },
     {
+      id: 'test-french-api',
+      title: 'API Française',
+      description: 'Tester l\'API gouvernementale (35k+ communes)',
+      icon: 'earth' as const,
+      color: '#10b981',
+      route: '/admin/test-french-api',
+    },
+    {
       id: 'map-test',
       title: 'Test des Cartes',
       description: 'Tester les fonctionnalités de cartographie',
