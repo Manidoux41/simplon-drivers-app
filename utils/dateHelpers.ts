@@ -92,3 +92,14 @@ export function validateDateBounds(date: Date): void {
     throw new Error(`Date hors limites: ${date.toISOString()}. Doit être entre ${minDate.toISOString()} et ${maxDate.toISOString()}`);
   }
 }
+
+/**
+ * Formate une date en format ISO pour la base de données
+ */
+export function formatDateTimeISO(date: Date): string {
+  if (isNaN(date.getTime())) {
+    throw new Error('Date invalide fournie');
+  }
+  
+  return date.toISOString();
+}

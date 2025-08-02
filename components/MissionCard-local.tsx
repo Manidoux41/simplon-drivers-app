@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Mission, Company } from '../lib/database';
+import { MissionPdfButton } from './MissionPdfButton';
+import { KilometrageStatusIcon } from './KilometrageStatusIcon';
 import { Colors } from '../constants/Colors';
 import { DateUtils } from '../utils/dateUtils';
 
@@ -10,6 +12,9 @@ interface MissionCardProps {
   onPress?: () => void;
   showStatus?: boolean;
   compact?: boolean;
+  showPdfActions?: boolean;
+  driverName?: string;
+  vehicleInfo?: string;
 }
 
 export function MissionCard({ 
@@ -17,7 +22,10 @@ export function MissionCard({
   company, 
   onPress, 
   showStatus = true, 
-  compact = false 
+  compact = false,
+  showPdfActions = true,
+  driverName = 'Chauffeur non assigné',
+  vehicleInfo = 'Véhicule non assigné'
 }: MissionCardProps) {
   const colors = Colors.light;
 
@@ -43,6 +51,14 @@ export function MissionCard({
 
   const cardStyle = compact ? styles.compactCard : styles.card;
 
+  // Préparation des données PDF
+  const pdfData = {
+    mission,
+    companyName: company?.name || 'Entreprise inconnue',
+    driverName,
+    vehicleInfo
+  };
+
   return (
     <TouchableOpacity
       style={[cardStyle, { backgroundColor: colors.card, borderColor: colors.border }]}
@@ -50,14 +66,33 @@ export function MissionCard({
       activeOpacity={0.7}
     >
       <View style={styles.header}>
-        <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
-          {mission.title}
-        </Text>
+        <View style={styles.titleContainer}>
+          <Text style={[styles.title, { color: colors.text }]} numberOfLines={1}>
+            {mission.title}
+          </Text>
+          {!compact && showPdfActions && (
+            <View style={styles.pdfActions}>
+              <MissionPdfButton 
+                missionData={pdfData} 
+                variant="share"
+                iconSize={14}
+              />
+              <MissionPdfButton 
+                missionData={pdfData} 
+                variant="print"
+                iconSize={14}
+              />
+            </View>
+          )}
+        </View>
         {showStatus && (
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(mission.status) }]}>
-            <Text style={[styles.statusText, { color: colors.textOnPrimary }]}>
-              {getStatusLabel(mission.status)}
-            </Text>
+          <View style={styles.statusContainer}>
+            <KilometrageStatusIcon mission={mission} size={16} />
+            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(mission.status) }]}>
+              <Text style={[styles.statusText, { color: colors.textOnPrimary }]}>
+                {getStatusLabel(mission.status)}
+              </Text>
+            </View>
           </View>
         )}
       </View>
@@ -180,5 +215,20 @@ const styles = StyleSheet.create({
   },
   passengersText: {
     fontSize: 12,
+  },
+  titleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pdfActions: {
+    flexDirection: 'row',
+    marginLeft: 8,
   },
 });

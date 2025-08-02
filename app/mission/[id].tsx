@@ -6,14 +6,20 @@ import {
   ScrollView,
   SafeAreaView,
   Alert,
+  Modal,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useMissions } from '../../hooks/useMissions-local';
+import { useDriversWithNotification } from '../../hooks/useDrivers';
+import { useVehicles } from '../../hooks/useVehicles';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
 import { RouteMap } from '../../components/RouteMap';
 import { RouteNavigationButtons } from '../../components/RouteNavigationButtons';
+import { MissionPdfActions } from '../../components/MissionPdfActions';
+import { KilometrageWorkflowV2 } from '../../components/KilometrageWorkflowV2';
+import { MissionTimeTracker } from '../../components/MissionTimeTracker';
 import { Colors } from '../../constants/Colors';
 import { DateUtils } from '../../utils/dateUtils';
 import { MapUtils } from '../../utils/mapUtils';
@@ -21,8 +27,12 @@ import { Mission } from '../../lib/database';
 
 export default function MissionDetailScreen() {
   const { id } = useLocalSearchParams();
-  const { missions, companies, updateMissionStatus, loading } = useMissions();
+  const { missions, companies, updateMissionStatus, loading, loadMissions } = useMissions();
+  const { drivers, loading: driversLoading } = useDriversWithNotification();
+  const { vehicles, loading: vehiclesLoading } = useVehicles();
   const [mission, setMission] = useState<Mission | null>(null);
+  const [showKilometrageWorkflow, setShowKilometrageWorkflow] = useState(false);
+  const [showTimeTracker, setShowTimeTracker] = useState(false);
   const colors = Colors.light;
 
   useEffect(() => {
@@ -31,6 +41,20 @@ export default function MissionDetailScreen() {
       setMission(foundMission || null);
     }
   }, [missions, id]);
+
+  const handleMissionUpdate = async () => {
+    // Recharger toutes les missions après mise à jour du kilométrage
+    try {
+      await loadMissions();
+      // Mettre à jour la mission locale
+      if (missions.length > 0 && id) {
+        const foundMission = missions.find(m => m.id === id);
+        setMission(foundMission || null);
+      }
+    } catch (error) {
+      console.error('Erreur rechargement mission:', error);
+    }
+  };
 
   const handleStatusUpdate = async (newStatus: string) => {
     if (!mission) return;
@@ -72,13 +96,26 @@ export default function MissionDetailScreen() {
     }
   };
 
-  if (loading || !mission) {
+  if (loading || driversLoading || vehiclesLoading || !mission) {
     return (
       <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
         <LoadingSpinner text="Chargement de la mission..." />
       </SafeAreaView>
     );
   }
+
+  // Préparation des données pour le PDF
+  const assignedDriver = drivers.find(d => d.id === mission.driverId);
+  const assignedVehicle = vehicles.find(v => v.id === mission.vehicleId);
+  
+  const pdfData = {
+    mission,
+    companyName: companies[mission.companyId]?.name || 'Entreprise inconnue',
+    driverName: assignedDriver ? `${assignedDriver.firstName} ${assignedDriver.lastName}` : 'Chauffeur non assigné',
+    vehicleInfo: assignedVehicle 
+      ? `${assignedVehicle.brand} ${assignedVehicle.model} (${assignedVehicle.licensePlate})`
+      : 'Véhicule non assigné'
+  };
 
   const distance = mission.distance || MapUtils.calculateDistance(
     { latitude: mission.departureLat, longitude: mission.departureLng },
@@ -234,28 +271,247 @@ export default function MissionDetailScreen() {
           </CardContent>
         </Card>
 
-        {/* Actions */}
-        {(canStart || canComplete) && (
+        {/* Actions PDF */}
+        <Card variant="elevated" style={styles.section}>
+          <CardHeader title="Exporter la mission" />
+          <CardContent>
+            <MissionPdfActions 
+              missionData={pdfData}
+              style={styles.pdfActions}
+            />
+            <Text style={[styles.pdfHint, { color: colors.textSecondary }]}>
+              💡 Imprimez ou partagez les détails de cette mission au format PDF pour archivage ou transmission.
+            </Text>
+          </CardContent>
+        </Card>
+
+        {/* Résumé kilométrique pour missions terminées */}
+        {mission.status === 'COMPLETED' && (mission.kmDepotStart || mission.kmMissionStart || mission.kmMissionEnd || mission.kmDepotEnd) && (
           <Card variant="elevated" style={styles.section}>
+            <CardHeader title="📊 Résumé kilométrique" />
+            <CardContent>
+              <View style={styles.kilometricSummary}>
+                {mission.kmDepotStart && (
+                  <View style={styles.kmRow}>
+                    <Text style={[styles.kmLabel, { color: colors.textSecondary }]}>
+                      🏢 Départ dépôt:
+                    </Text>
+                    <Text style={[styles.kmValue, { color: colors.text }]}>
+                      {mission.kmDepotStart.toLocaleString()} km
+                    </Text>
+                  </View>
+                )}
+                {mission.kmMissionStart && (
+                  <View style={styles.kmRow}>
+                    <Text style={[styles.kmLabel, { color: colors.textSecondary }]}>
+                      🎯 Début mission:
+                    </Text>
+                    <Text style={[styles.kmValue, { color: colors.text }]}>
+                      {mission.kmMissionStart.toLocaleString()} km
+                    </Text>
+                  </View>
+                )}
+                {mission.kmMissionEnd && (
+                  <View style={styles.kmRow}>
+                    <Text style={[styles.kmLabel, { color: colors.textSecondary }]}>
+                      🏁 Fin mission:
+                    </Text>
+                    <Text style={[styles.kmValue, { color: colors.text }]}>
+                      {mission.kmMissionEnd.toLocaleString()} km
+                    </Text>
+                  </View>
+                )}
+                {mission.kmDepotEnd && (
+                  <View style={styles.kmRow}>
+                    <Text style={[styles.kmLabel, { color: colors.textSecondary }]}>
+                      🏢 Retour dépôt:
+                    </Text>
+                    <Text style={[styles.kmValue, { color: colors.text }]}>
+                      {mission.kmDepotEnd.toLocaleString()} km
+                    </Text>
+                  </View>
+                )}
+                
+                {mission.kmDepotStart && mission.kmDepotEnd && (
+                  <View style={[styles.kmRow, styles.totalKmRow]}>
+                    <Text style={[styles.kmLabel, { color: colors.text, fontWeight: '600' }]}>
+                      📏 Distance totale:
+                    </Text>
+                    <Text style={[styles.kmValue, styles.totalKmValue, { color: colors.primary }]}>
+                      {(mission.kmDepotEnd - mission.kmDepotStart).toLocaleString()} km
+                    </Text>
+                  </View>
+                )}
+              </View>
+              
+              <Button
+                title="✏️ Modifier le kilométrage"
+                onPress={() => setShowKilometrageWorkflow(true)}
+                variant="ghost"
+                style={styles.editKmButton}
+              />
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Système de Kilométrage */}
+        {(canStart || canComplete || mission.status === 'IN_PROGRESS') && (
+          <Card variant="elevated" style={styles.section}>
+            <CardHeader title="Suivi kilométrique" />
+            <CardContent>
+              <Button
+                title="📊 Gérer le kilométrage"
+                onPress={() => setShowKilometrageWorkflow(true)}
+                variant="primary"
+                style={styles.actionButton}
+              />
+              <Text style={[styles.pdfHint, { color: colors.textSecondary }]}>
+                🚗 Suivez précisément les distances parcourues pour cette mission
+              </Text>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Modal du workflow kilométrique */}
+        <Modal
+          visible={showKilometrageWorkflow}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowKilometrageWorkflow(false)}
+        >
+          <SafeAreaView style={[styles.modalContainer, { backgroundColor: colors.background }]}>
+            <KilometrageWorkflowV2
+              missionId={mission.id}
+              onClose={() => setShowKilometrageWorkflow(false)}
+              onMissionUpdated={handleMissionUpdate}
+            />
+          </SafeAreaView>
+        </Modal>
+
+        {/* Suivi des temps de travail */}
+        {mission.status === 'IN_PROGRESS' || mission.status === 'COMPLETED' ? (
+          <Card variant="elevated" style={styles.section}>
+            <CardHeader title="Temps de travail" />
+            <CardContent>
+              {/* Affichage des temps actuels */}
+              <View style={styles.timeStatsContainer}>
+                <View style={styles.timeStatRow}>
+                  <View style={styles.timeStatItem}>
+                    <Text style={[styles.timeStatLabel, { color: colors.textSecondary }]}>
+                      🚗 Conduite
+                    </Text>
+                    <Text style={[styles.timeStatValue, { color: colors.text }]}>
+                      {mission.drivingTimeMinutes ? 
+                        `${Math.floor(mission.drivingTimeMinutes / 60)}h${(mission.drivingTimeMinutes % 60).toString().padStart(2, '0')}` 
+                        : 'Non renseigné'}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.timeStatItem}>
+                    <Text style={[styles.timeStatLabel, { color: colors.textSecondary }]}>
+                      😴 Repos
+                    </Text>
+                    <Text style={[styles.timeStatValue, { color: colors.text }]}>
+                      {mission.restTimeMinutes ? 
+                        `${Math.floor(mission.restTimeMinutes / 60)}h${(mission.restTimeMinutes % 60).toString().padStart(2, '0')}` 
+                        : 'Non renseigné'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.timeStatRow}>
+                  <View style={styles.timeStatItem}>
+                    <Text style={[styles.timeStatLabel, { color: colors.textSecondary }]}>
+                      ⏳ Attente
+                    </Text>
+                    <Text style={[styles.timeStatValue, { color: colors.text }]}>
+                      {mission.waitingTimeMinutes ? 
+                        `${Math.floor(mission.waitingTimeMinutes / 60)}h${(mission.waitingTimeMinutes % 60).toString().padStart(2, '0')}` 
+                        : 'Non renseigné'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.timeStatItem}>
+                    <Text style={[styles.timeStatLabel, { color: colors.textSecondary }]}>
+                      📊 Total
+                    </Text>
+                    <Text style={[styles.timeStatValue, styles.totalTime, { color: colors.primary }]}>
+                      {(() => {
+                        const total = (mission.drivingTimeMinutes || 0) + (mission.restTimeMinutes || 0) + (mission.waitingTimeMinutes || 0);
+                        return total > 0 ? 
+                          `${Math.floor(total / 60)}h${(total % 60).toString().padStart(2, '0')}` 
+                          : 'Aucun temps';
+                      })()}
+                    </Text>
+                  </View>
+                </View>
+
+                {mission.drivingTimeComment && (
+                  <View style={styles.commentSection}>
+                    <Text style={[styles.commentLabel, { color: colors.textSecondary }]}>
+                      💬 Commentaires:
+                    </Text>
+                    <Text style={[styles.commentText, { color: colors.text }]}>
+                      {mission.drivingTimeComment}
+                    </Text>
+                  </View>
+                )}
+              </View>
+
+              <Button
+                title="⏱️ Modifier les temps de travail"
+                onPress={() => setShowTimeTracker(true)}
+                variant="ghost"
+                style={styles.editTimeButton}
+              />
+              
+              <Text style={[styles.timeHint, { color: colors.textSecondary }]}>
+                ⏱️ Renseignez vos temps de conduite, repos et attente pour un suivi précis
+              </Text>
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {/* Modal du tracker de temps */}
+        <MissionTimeTracker
+          missionId={mission.id}
+          isVisible={showTimeTracker}
+          onClose={() => setShowTimeTracker(false)}
+          onTimesSaved={handleMissionUpdate}
+          initialTimes={{
+            drivingTimeMinutes: mission.drivingTimeMinutes,
+            restTimeMinutes: mission.restTimeMinutes,
+            waitingTimeMinutes: mission.waitingTimeMinutes,
+            drivingTimeComment: mission.drivingTimeComment,
+          }}
+        />
+
+        {/* Actions de statut alternatives (si pas de kilométrage actif) */}
+        {(canStart || canComplete) && mission.status !== 'IN_PROGRESS' && (
+          <Card variant="elevated" style={styles.section}>
+            <CardHeader title="Actions de mission" />
             <CardContent>
               <View style={styles.actions}>
                 {canStart && (
                   <Button
-                    title="Commencer la mission"
+                    title="Démarrer sans kilométrage"
                     onPress={() => handleStatusUpdate('IN_PROGRESS')}
-                    variant="primary"
+                    variant="ghost"
                     style={styles.actionButton}
                   />
                 )}
                 {canComplete && (
                   <Button
-                    title="Terminer la mission"
+                    title="Terminer sans kilométrage"
                     onPress={() => handleStatusUpdate('COMPLETED')}
-                    variant="secondary"
+                    variant="ghost"
                     style={styles.actionButton}
                   />
                 )}
               </View>
+              <Text style={[styles.alternativeHint, { color: colors.textSecondary }]}>
+                ⚠️ Actions alternatives sans suivi kilométrique
+              </Text>
             </CardContent>
           </Card>
         )}
@@ -370,6 +626,22 @@ const styles = StyleSheet.create({
   actionButton: {
     marginBottom: 8,
   },
+  pdfActions: {
+    marginBottom: 12,
+  },
+  pdfHint: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 18,
+  },
+  alternativeHint: {
+    fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    lineHeight: 18,
+    marginTop: 8,
+  },
   mapSection: {
     marginBottom: 20,
   },
@@ -382,5 +654,89 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.light.border,
+  },
+  modalContainer: {
+    flex: 1,
+  },
+  kilometricSummary: {
+    marginBottom: 16,
+  },
+  kmRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+    paddingVertical: 4,
+  },
+  totalKmRow: {
+    marginTop: 8,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.light.border,
+  },
+  kmLabel: {
+    fontSize: 14,
+  },
+  kmValue: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  totalKmValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  editKmButton: {
+    marginTop: 8,
+  },
+  timeStatsContainer: {
+    marginBottom: 16,
+  },
+  timeStatRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  timeStatItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  timeStatLabel: {
+    fontSize: 12,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  timeStatValue: {
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  totalTime: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  commentSection: {
+    marginTop: 12,
+    padding: 12,
+    backgroundColor: Colors.light.background,
+    borderRadius: 8,
+  },
+  commentLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  commentText: {
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  editTimeButton: {
+    marginTop: 8,
+  },
+  timeHint: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 8,
+    fontStyle: 'italic',
   },
 });

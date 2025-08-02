@@ -36,6 +36,15 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
+# Google Service Account (SENSITIVE - DO NOT COMMIT)
+google-service-account.json
+*service-account*.json
+
+# Build artifacts
+*.aab
+*.apk
+*.ipa
+
 app-example
 
 /app/generated/prisma

@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth-local';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
+import { WorkTimeStats } from '../../components/WorkTimeStats';
 import { Colors } from '../../constants/Colors';
 
 export default function ProfileScreen() {
@@ -85,6 +86,16 @@ export default function ProfileScreen() {
             </View>
           </CardContent>
         </Card>
+
+        {/* Statistiques de temps de travail (pour les chauffeurs uniquement) */}
+        {user?.role === 'DRIVER' && (
+          <Card variant="elevated" style={styles.section}>
+            <CardHeader title="Mes temps de travail" />
+            <CardContent>
+              <WorkTimeStats driverId={user.id.toString()} currentUser={user} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Actions */}
         <Card variant="elevated" style={styles.section}>

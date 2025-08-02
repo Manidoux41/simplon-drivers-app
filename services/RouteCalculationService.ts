@@ -172,6 +172,140 @@ export class RouteCalculationService {
   }
 
   /**
+   * Calcule un itinéraire multi-étapes
+   */
+  static async calculateMultiStepRoute(
+    waypoints: RoutePoint[],
+    profile: 'driving-car' | 'cycling-regular' | 'foot-walking' = 'driving-car'
+  ): Promise<{
+    success: boolean;
+    totalDistance?: number;
+    totalDuration?: number;
+    segments?: Array<{
+      distance: number;
+      duration: number;
+      polyline: RoutePoint[];
+    }>;
+    polyline?: RoutePoint[];
+    error?: string;
+  }> {
+    if (waypoints.length < 2) {
+      return {
+        success: false,
+        error: 'Au moins 2 points sont requis'
+      };
+    }
+
+    try {
+      const segments = [];
+      let totalDistance = 0;
+      let totalDuration = 0;
+      let allPolyline: RoutePoint[] = [];
+
+      // Calculer chaque segment
+      for (let i = 0; i < waypoints.length - 1; i++) {
+        const segmentResult = await this.calculateRoute(
+          waypoints[i],
+          waypoints[i + 1],
+          profile
+        );
+
+        if (!segmentResult) {
+          return {
+            success: false,
+            error: `Erreur segment ${i + 1}`
+          };
+        }
+
+        segments.push({
+          distance: segmentResult.distance,
+          duration: segmentResult.duration,
+          polyline: segmentResult.polyline
+        });
+
+        totalDistance += segmentResult.distance;
+        totalDuration += segmentResult.duration;
+
+        // Ajouter à la polyline globale (éviter les doublons aux points de jonction)
+        if (i === 0) {
+          allPolyline = [...segmentResult.polyline];
+        } else {
+          // Enlever le premier point pour éviter la duplication
+          allPolyline = [...allPolyline, ...segmentResult.polyline.slice(1)];
+        }
+      }
+
+      return {
+        success: true,
+        totalDistance,
+        totalDuration,
+        segments,
+        polyline: allPolyline
+      };
+
+    } catch (error) {
+      console.error('❌ Erreur calcul itinéraire multi-étapes:', error);
+      return {
+        success: false,
+        error: 'Impossible de calculer l\'itinéraire multi-étapes'
+      };
+    }
+  }
+
+  /**
+   * Optimise l'ordre des waypoints pour le trajet le plus court
+   */
+  static async optimizeWaypointOrder(
+    start: RoutePoint,
+    waypoints: RoutePoint[],
+    end: RoutePoint
+  ): Promise<RoutePoint[]> {
+    if (waypoints.length <= 1) {
+      return waypoints;
+    }
+
+    // Pour un nombre réduit de waypoints, on peut essayer plusieurs optimisations
+    if (waypoints.length <= 5) {
+      return await this.optimizeByNearestNeighbor(start, waypoints, end);
+    }
+
+    // Pour plus de waypoints, utiliser l'algorithme du plus proche voisin
+    return await this.optimizeByNearestNeighbor(start, waypoints, end);
+  }
+
+  /**
+   * Optimisation par algorithme du plus proche voisin
+   */
+  private static async optimizeByNearestNeighbor(
+    start: RoutePoint,
+    waypoints: RoutePoint[],
+    end: RoutePoint
+  ): Promise<RoutePoint[]> {
+    const unvisited = [...waypoints];
+    const optimized: RoutePoint[] = [];
+    let current = start;
+
+    while (unvisited.length > 0) {
+      let nearestIndex = 0;
+      let nearestDistance = this.calculateHaversineDistance(current, unvisited[0]);
+
+      for (let i = 1; i < unvisited.length; i++) {
+        const distance = this.calculateHaversineDistance(current, unvisited[i]);
+        if (distance < nearestDistance) {
+          nearestDistance = distance;
+          nearestIndex = i;
+        }
+      }
+
+      const nearest = unvisited.splice(nearestIndex, 1)[0];
+      optimized.push(nearest);
+      current = nearest;
+    }
+
+    return optimized;
+  }
+
+  /**
    * Calcule la distance à vol d'oiseau entre deux points (méthode publique)
    */
   static calculateStraightLineDistance(start: RoutePoint, end: RoutePoint): number {

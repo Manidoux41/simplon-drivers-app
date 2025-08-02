@@ -12,6 +12,8 @@ import { useMissions } from '../../hooks/useMissions-local';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
+import { MissionPdfMenu } from '../../components/MissionPdfMenu';
+import { KilometrageStatusIcon } from '../../components/KilometrageStatusIcon';
 import { Colors } from '../../constants/Colors';
 import { DateUtils } from '../../utils/dateUtils';
 import { databaseService } from '../../lib/database';
@@ -132,9 +134,12 @@ export default function AllMissionsScreen() {
               missions.map((mission) => (
                 <View key={mission.id} style={styles.missionItem}>
                   <View style={styles.missionHeader}>
-                    <Text style={[styles.missionTitle, { color: colors.text }]}>
-                      {mission.title}
-                    </Text>
+                    <View style={styles.missionTitleContainer}>
+                      <Text style={[styles.missionTitle, { color: colors.text }]}>
+                        {mission.title}
+                      </Text>
+                      <KilometrageStatusIcon mission={mission} size={18} />
+                    </View>
                     <View style={[
                       styles.statusBadge,
                       { 
@@ -175,6 +180,25 @@ export default function AllMissionsScreen() {
                       onPress={() => router.push(`/mission/${mission.id}` as any)}
                       variant="ghost"
                       style={styles.actionButton}
+                    />
+                    {mission.status === 'PENDING' && (
+                      <Button
+                        title="Modifier"
+                        onPress={() => router.push(`/admin/edit-mission/${mission.id}` as any)}
+                        variant="ghost"
+                        style={styles.editButton}
+                      />
+                    )}
+                    <MissionPdfMenu
+                      mission={mission}
+                      companyName={companies[mission.companyId]?.name}
+                      driverName={(() => {
+                        const driver = drivers.find(d => d.id === mission.driverId);
+                        return driver ? `${driver.firstName} ${driver.lastName}` : 'Chauffeur non assigné';
+                      })()}
+                      vehicleInfo={mission.vehicleId ? `Véhicule ${mission.vehicleId}` : 'Véhicule non assigné'}
+                      triggerStyle={styles.pdfButton}
+                      iconSize={16}
                     />
                     {mission.status === 'PENDING' && (
                       <Button
@@ -255,6 +279,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
+  missionTitleContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   statusBadge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -275,6 +305,13 @@ const styles = StyleSheet.create({
   },
   actionButton: {
     flex: 1,
+  },
+  editButton: {
+    backgroundColor: '#eff6ff',
+    borderColor: '#2563eb',
+  },
+  pdfButton: {
+    marginHorizontal: 4,
   },
   emptyText: {
     fontSize: 16,

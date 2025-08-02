@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -19,15 +19,22 @@ import { Button } from '../../components/ui/Button';
 import { Header } from '../../components/ui/Header';
 import { PhoneButton } from '../../components/ui/PhoneButton';
 import { AddressPickerWithMap, AddressPickerResult } from '../../components/AddressPickerWithMap';
+import { EnhancedAddressPicker } from '../../components/EnhancedAddressPicker';
 import { IntegratedRouteMap } from '../../components/IntegratedRouteMap';
 import { databaseService, Mission } from '../../lib/database';
 import { RouteCalculationService, RouteResult } from '../../services/RouteCalculationService';
-import { parseDateTime, addMinutes, validateDateBounds, formatDateTime } from '../../utils/dateHelpers';
+import { EnhancedRouteBuilder } from '../../components/EnhancedRouteBuilder';
+import { parseDateTime, addMinutes, validateDateBounds, formatDateTimeISO } from '../../utils/dateHelpers';
 
 export default function CreateMissionScreen() {
   const router = useRouter();
   const { vehicles, loading: vehiclesLoading } = useVehicles();
   const { drivers, loading: driversLoading } = useDriversWithNotification();
+
+  // Debug: afficher le nombre de véhicules
+  React.useEffect(() => {
+    console.log('🚗 Véhicules chargés:', vehicles.length, vehicles);
+  }, [vehicles]);
 
   // État du formulaire principal
   const [missionForm, setMissionForm] = useState({
@@ -53,6 +60,11 @@ export default function CreateMissionScreen() {
   // États des modals
   const [showPickupPicker, setShowPickupPicker] = useState(false);
   const [showDestinationPicker, setShowDestinationPicker] = useState(false);
+  
+  // Mode de création d'itinéraire
+  const [useAdvancedRoute, setUseAdvancedRoute] = useState(false);
+  const [advancedWaypoints, setAdvancedWaypoints] = useState<any[]>([]);
+  const [advancedRouteStats, setAdvancedRouteStats] = useState<any>(null);
 
   // Chargement
   const [creating, setCreating] = useState(false);
@@ -88,20 +100,95 @@ export default function CreateMissionScreen() {
     setCalculatedRoute(route);
   };
 
+  // Gestionnaires pour le mode avancé
+  const handleAdvancedRouteChange = useCallback((waypoints: any[]) => {
+    setAdvancedWaypoints(waypoints);
+    
+    // Mettre à jour les adresses de départ et destination principales
+    if (waypoints.length >= 2) {
+      const sortedWaypoints = [...waypoints].sort((a, b) => a.order - b.order);
+      const departure = sortedWaypoints[0];
+      const destination = sortedWaypoints[sortedWaypoints.length - 1];
+      
+      setMissionForm(prev => ({
+        ...prev,
+        pickupLocation: departure.address || prev.pickupLocation,
+        destination: destination.address || prev.destination
+      }));
+
+      setPickupCoords({
+        latitude: departure.latitude,
+        longitude: departure.longitude
+      });
+
+      setDestinationCoords({
+        latitude: destination.latitude,
+        longitude: destination.longitude
+      });
+    }
+  }, []);
+
+  const handleAdvancedRouteStatsChange = useCallback((stats: any) => {
+    setAdvancedRouteStats(stats);
+  }, []);
+
+  const toggleRouteMode = () => {
+    if (useAdvancedRoute && advancedWaypoints.length >= 2) {
+      // Passer du mode avancé au mode simple - garder départ et destination
+      const sortedWaypoints = [...advancedWaypoints].sort((a, b) => a.order - b.order);
+      const departure = sortedWaypoints[0];
+      const destination = sortedWaypoints[sortedWaypoints.length - 1];
+      
+      setMissionForm(prev => ({
+        ...prev,
+        pickupLocation: departure.address,
+        destination: destination.address
+      }));
+
+      setPickupCoords({
+        latitude: departure.latitude,
+        longitude: departure.longitude
+      });
+
+      setDestinationCoords({
+        latitude: destination.latitude,
+        longitude: destination.longitude
+      });
+    }
+    
+    setUseAdvancedRoute(!useAdvancedRoute);
+  };
+
   // Validation du formulaire
   const validateForm = () => {
     if (!missionForm.title.trim()) {
       Alert.alert('Erreur', 'Le titre de la mission est requis');
       return false;
     }
-    if (!missionForm.pickupLocation.trim()) {
-      Alert.alert('Erreur', 'L\'adresse de départ est requise');
-      return false;
+
+    // Validation selon le mode
+    if (useAdvancedRoute) {
+      if (advancedWaypoints.length < 2) {
+        Alert.alert('Erreur', 'Veuillez définir au moins un point de départ et d\'arrivée');
+        return false;
+      }
+      
+      const hasEmptyWaypoints = advancedWaypoints.some(w => !w.address || !w.latitude || !w.longitude);
+      if (hasEmptyWaypoints) {
+        Alert.alert('Erreur', 'Toutes les étapes doivent avoir une adresse valide');
+        return false;
+      }
+    } else {
+      if (!missionForm.pickupLocation.trim()) {
+        Alert.alert('Erreur', 'L\'adresse de départ est requise');
+        return false;
+      }
+      if (!missionForm.destination.trim()) {
+        Alert.alert('Erreur', 'L\'adresse de destination est requise');
+        return false;
+      }
     }
-    if (!missionForm.destination.trim()) {
-      Alert.alert('Erreur', 'L\'adresse de destination est requise');
-      return false;
-    }
+
     if (!missionForm.driverId) {
       Alert.alert('Erreur', 'Un conducteur doit être sélectionné');
       return false;
@@ -142,23 +229,49 @@ export default function CreateMissionScreen() {
       const datetime = parseDateTime(missionForm.date, missionForm.time);
       if (!datetime) throw new Error('Date/heure invalide');
 
-      // Coordonnées finales (utiliser celles sélectionnées ou par défaut)
-      const finalPickupCoords = pickupCoords || { latitude: 48.8566, longitude: 2.3522 };
-      const finalDestinationCoords = destinationCoords || { latitude: 48.8566, longitude: 2.3522 };
-
-      // Calculer la distance à partir de l'itinéraire ou distance directe
+      // Coordonnées finales selon le mode
+      let finalPickupCoords, finalDestinationCoords;
       let distance = 0;
       let estimatedDurationMinutes = 60;
 
-      if (calculatedRoute) {
-        distance = calculatedRoute.distance;
-        estimatedDurationMinutes = calculatedRoute.duration;
+      if (useAdvancedRoute && advancedWaypoints.length >= 2) {
+        // Mode avancé - utiliser les statistiques calculées
+        const sortedWaypoints = [...advancedWaypoints].sort((a, b) => a.order - b.order);
+        finalPickupCoords = {
+          latitude: sortedWaypoints[0].latitude,
+          longitude: sortedWaypoints[0].longitude
+        };
+        finalDestinationCoords = {
+          latitude: sortedWaypoints[sortedWaypoints.length - 1].latitude,
+          longitude: sortedWaypoints[sortedWaypoints.length - 1].longitude
+        };
+
+        if (advancedRouteStats) {
+          distance = advancedRouteStats.totalDistance / 1000; // convertir en km
+          estimatedDurationMinutes = advancedRouteStats.totalDuration;
+        } else {
+          // Fallback si pas de stats
+          const dx = finalDestinationCoords.latitude - finalPickupCoords.latitude;
+          const dy = finalDestinationCoords.longitude - finalPickupCoords.longitude;
+          distance = Math.sqrt(dx * dx + dy * dy) * 111.32;
+          estimatedDurationMinutes = Math.max(30, Math.round((distance / 50) * 60));
+        }
       } else {
-        // Calcul distance directe si pas d'itinéraire
-        const dx = finalDestinationCoords.latitude - finalPickupCoords.latitude;
-        const dy = finalDestinationCoords.longitude - finalPickupCoords.longitude;
-        distance = Math.sqrt(dx * dx + dy * dy) * 111.32; // Approximation en km
-        estimatedDurationMinutes = Math.max(30, Math.round((distance / 50) * 60));
+        // Mode simple - utiliser les coordonnées sélectionnées ou par défaut
+        finalPickupCoords = pickupCoords || { latitude: 48.8566, longitude: 2.3522 };
+        finalDestinationCoords = destinationCoords || { latitude: 48.8566, longitude: 2.3522 };
+
+        // Calculer la distance à partir de l'itinéraire ou distance directe
+        if (calculatedRoute) {
+          distance = calculatedRoute.distance;
+          estimatedDurationMinutes = calculatedRoute.duration;
+        } else {
+          // Calcul distance directe si pas d'itinéraire
+          const dx = finalDestinationCoords.latitude - finalPickupCoords.latitude;
+          const dy = finalDestinationCoords.longitude - finalPickupCoords.longitude;
+          distance = Math.sqrt(dx * dx + dy * dy) * 111.32; // Approximation en km
+          estimatedDurationMinutes = Math.max(30, Math.round((distance / 50) * 60));
+        }
       }
 
       const estimatedEndTime = addMinutes(datetime, estimatedDurationMinutes);
@@ -172,12 +285,12 @@ export default function CreateMissionScreen() {
         departureAddress: missionForm.pickupLocation.trim(),
         departureLat: finalPickupCoords.latitude,
         departureLng: finalPickupCoords.longitude,
-        scheduledDepartureAt: formatDateTime(datetime),
+        scheduledDepartureAt: formatDateTimeISO(datetime),
         arrivalLocation: missionForm.destination.trim(),
         arrivalAddress: missionForm.destination.trim(),
         arrivalLat: finalDestinationCoords.latitude,
         arrivalLng: finalDestinationCoords.longitude,
-        estimatedArrivalAt: formatDateTime(estimatedEndTime),
+        estimatedArrivalAt: formatDateTimeISO(estimatedEndTime),
         distance: distance,
         estimatedDuration: estimatedDurationMinutes,
         maxPassengers: parseInt(missionForm.passengerCount),
@@ -258,57 +371,101 @@ export default function CreateMissionScreen() {
 
         {/* Adresses et itinéraire */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Itinéraire</Text>
-          
-          {/* Adresse de départ */}
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Adresse de départ *</Text>
+          <View style={styles.sectionHeader}>
+            <Text style={styles.sectionTitle}>Itinéraire</Text>
             <TouchableOpacity
-              style={styles.addressButton}
-              onPress={() => setShowPickupPicker(true)}
+              style={[
+                styles.toggleButton,
+                useAdvancedRoute && styles.toggleButtonActive
+              ]}
+              onPress={toggleRouteMode}
             >
-              <Ionicons name="location" size={20} color={Colors.light.primary} />
-              <Text style={[
-                styles.addressButtonText,
-                !missionForm.pickupLocation && styles.placeholderText
-              ]}>
-                {missionForm.pickupLocation || "Sélectionner l'adresse de départ"}
-              </Text>
-              <Ionicons name="chevron-forward" size={20} color="#999" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Adresse de destination */}
-          <View style={styles.formGroup}>
-            <Text style={styles.label}>Adresse de destination *</Text>
-            <TouchableOpacity
-              style={styles.addressButton}
-              onPress={() => setShowDestinationPicker(true)}
-            >
-              <Ionicons name="location" size={20} color={Colors.light.primary} />
-              <Text style={[
-                styles.addressButtonText,
-                !missionForm.destination && styles.placeholderText
-              ]}>
-                {missionForm.destination || "Sélectionner l'adresse de destination"}
-              </Text>
-              <Ionicons name="chevron-forward" size={20} color="#999" />
-            </TouchableOpacity>
-          </View>
-
-          {/* Aperçu de l'itinéraire */}
-          {pickupCoords && destinationCoords && (
-            <View style={styles.formGroup}>
-              <Text style={styles.label}>Aperçu de l'itinéraire</Text>
-              <IntegratedRouteMap
-                startPoint={pickupCoords}
-                endPoint={destinationCoords}
-                startAddress={missionForm.pickupLocation}
-                endAddress={missionForm.destination}
-                onRouteCalculated={handleRouteCalculated}
-                style={styles.routeMap}
+              <Ionicons 
+                name={useAdvancedRoute ? "map" : "location"} 
+                size={16} 
+                color={useAdvancedRoute ? "#fff" : Colors.light.primary} 
               />
-            </View>
+              <Text style={[
+                styles.toggleButtonText,
+                useAdvancedRoute && styles.toggleButtonTextActive
+              ]}>
+                {useAdvancedRoute ? "Mode avancé" : "Mode simple"}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
+          {!useAdvancedRoute ? (
+            <>
+              {/* Mode simple - Adresses séparées */}
+              {/* Adresse de départ */}
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Adresse de départ *</Text>
+                <TouchableOpacity
+                  style={styles.addressButton}
+                  onPress={() => setShowPickupPicker(true)}
+                >
+                  <Ionicons name="location" size={20} color={Colors.light.primary} />
+                  <Text style={[
+                    styles.addressButtonText,
+                    !missionForm.pickupLocation && styles.placeholderText
+                  ]}>
+                    {missionForm.pickupLocation || "Sélectionner l'adresse de départ"}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#999" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Adresse de destination */}
+              <View style={styles.formGroup}>
+                <Text style={styles.label}>Adresse de destination *</Text>
+                <TouchableOpacity
+                  style={styles.addressButton}
+                  onPress={() => setShowDestinationPicker(true)}
+                >
+                  <Ionicons name="location" size={20} color={Colors.light.primary} />
+                  <Text style={[
+                    styles.addressButtonText,
+                    !missionForm.destination && styles.placeholderText
+                  ]}>
+                    {missionForm.destination || "Sélectionner l'adresse de destination"}
+                  </Text>
+                  <Ionicons name="chevron-forward" size={20} color="#999" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Aperçu de l'itinéraire simple */}
+              {pickupCoords && destinationCoords && (
+                <View style={styles.formGroup}>
+                  <Text style={styles.label}>Aperçu de l'itinéraire</Text>
+                  <IntegratedRouteMap
+                    startPoint={pickupCoords}
+                    endPoint={destinationCoords}
+                    startAddress={missionForm.pickupLocation}
+                    endAddress={missionForm.destination}
+                    onRouteCalculated={handleRouteCalculated}
+                    style={styles.routeMap}
+                  />
+                </View>
+              )}
+            </>
+          ) : (
+            <>
+              {/* Mode avancé - Constructeur multi-étapes */}
+              <EnhancedRouteBuilder
+                initialDeparture={pickupCoords ? {
+                  address: missionForm.pickupLocation,
+                  latitude: pickupCoords.latitude,
+                  longitude: pickupCoords.longitude
+                } : undefined}
+                initialDestination={destinationCoords ? {
+                  address: missionForm.destination,
+                  latitude: destinationCoords.latitude,
+                  longitude: destinationCoords.longitude
+                } : undefined}
+                onRouteChange={handleAdvancedRouteChange}
+                onRouteStatsChange={handleAdvancedRouteStatsChange}
+              />
+            </>
           )}
         </View>
 
@@ -398,31 +555,37 @@ export default function CreateMissionScreen() {
           {/* Sélection du véhicule */}
           <View style={styles.formGroup}>
             <Text style={styles.label}>Véhicule *</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.vehiclesList}>
-              {vehicles.map((vehicle) => (
-                <TouchableOpacity
-                  key={vehicle.id}
-                  style={[
-                    styles.vehicleCard,
-                    missionForm.vehicleId === vehicle.id.toString() && styles.selectedVehicleCard
-                  ]}
-                  onPress={() => setMissionForm(prev => ({ ...prev, vehicleId: vehicle.id.toString() }))}
-                >
-                  <Text style={[
-                    styles.vehicleCardName,
-                    missionForm.vehicleId === vehicle.id.toString() && styles.selectedVehicleCardName
-                  ]}>
-                    {vehicle.brand} {vehicle.model}
-                  </Text>
-                  <Text style={styles.vehicleCardCapacity}>
-                    {vehicle.registrationDocument.seats} places
-                  </Text>
-                  <Text style={styles.vehicleCardPlate}>
-                    {vehicle.licensePlate}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {vehicles.length === 0 ? (
+              <Text style={[styles.emptyText, { color: Colors.light.textSecondary }]}>
+                Aucun véhicule disponible
+              </Text>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.vehiclesList}>
+                {vehicles.map((vehicle) => (
+                  <TouchableOpacity
+                    key={vehicle.id}
+                    style={[
+                      styles.vehicleCard,
+                      missionForm.vehicleId === vehicle.id.toString() && styles.selectedVehicleCard
+                    ]}
+                    onPress={() => setMissionForm(prev => ({ ...prev, vehicleId: vehicle.id.toString() }))}
+                  >
+                    <Text style={[
+                      styles.vehicleCardName,
+                      missionForm.vehicleId === vehicle.id.toString() && styles.selectedVehicleCardName
+                    ]}>
+                      {vehicle.brand} {vehicle.model}
+                    </Text>
+                    <Text style={styles.vehicleCardCapacity}>
+                      {vehicle.registrationDocument.seats} places
+                    </Text>
+                    <Text style={styles.vehicleCardPlate}>
+                      {vehicle.licensePlate}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </ScrollView>
+            )}
           </View>
         </View>
 
@@ -452,25 +615,27 @@ export default function CreateMissionScreen() {
 
       {/* Modal sélection adresse de départ */}
       <Modal visible={showPickupPicker} animationType="slide" presentationStyle="pageSheet">
-        <AddressPickerWithMap
+        <EnhancedAddressPicker
           title="Adresse de départ"
-          placeholder="Rechercher l'adresse de départ..."
+          placeholder="Tapez l'adresse complète de départ (rue, ville...)"
           onAddressSelected={handlePickupSelected}
           onCancel={() => setShowPickupPicker(false)}
           initialAddress={missionForm.pickupLocation}
           initialCoordinates={pickupCoords || undefined}
+          showMap={true}
         />
       </Modal>
 
       {/* Modal sélection adresse de destination */}
       <Modal visible={showDestinationPicker} animationType="slide" presentationStyle="pageSheet">
-        <AddressPickerWithMap
+        <EnhancedAddressPicker
           title="Adresse de destination"
-          placeholder="Rechercher l'adresse de destination..."
+          placeholder="Tapez l'adresse complète de destination (rue, ville...)"
           onAddressSelected={handleDestinationSelected}
           onCancel={() => setShowDestinationPicker(false)}
           initialAddress={missionForm.destination}
           initialCoordinates={destinationCoords || undefined}
+          showMap={true}
         />
       </Modal>
     </View>
@@ -498,6 +663,34 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#333',
     marginBottom: 16,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  toggleButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.light.primary,
+    backgroundColor: 'transparent',
+    gap: 6,
+  },
+  toggleButtonActive: {
+    backgroundColor: Colors.light.primary,
+  },
+  toggleButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: Colors.light.primary,
+  },
+  toggleButtonTextActive: {
+    color: '#fff',
   },
   formGroup: {
     marginBottom: 16,
@@ -635,6 +828,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#999',
     fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace',
+  },
+  emptyText: {
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    padding: 16,
   },
   submitSection: {
     marginTop: 24,

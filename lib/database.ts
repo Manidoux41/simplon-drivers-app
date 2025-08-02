@@ -70,8 +70,48 @@ export interface Mission {
   driverId: string;
   companyId: string;
   vehicleId?: string; // ID du véhicule assigné
+  
+  // Suivi kilométrique
+  kmDepotStart?: number; // Kilométrage départ dépôt
+  kmMissionStart?: number; // Kilométrage début mission (lieu de prise en charge)
+  kmMissionEnd?: number; // Kilométrage fin mission (lieu de destination)
+  kmDepotEnd?: number; // Kilométrage retour dépôt
+  
+  // Distances calculées
+  distanceDepotToDepot?: number; // Distance totale dépôt à dépôt
+  distanceMissionOnly?: number; // Distance mission uniquement (prise en charge -> destination)
+  
+  // Suivi des temps (en minutes)
+  drivingTimeMinutes?: number; // Temps de conduite saisi par le chauffeur
+  restTimeMinutes?: number; // Temps de repos saisi par le chauffeur  
+  waitingTimeMinutes?: number; // Temps d'attente saisi par le chauffeur
+  drivingTimeComment?: string; // Commentaire optionnel sur les temps de conduite
+  
   createdAt: string;
   updatedAt: string;
+}
+
+// Interface pour les temps de travail par jour
+export interface DriverWorkTime {
+  id: string;
+  driverId: string;
+  year: number;
+  month: number;
+  day: number;
+  totalDrivingMinutes: number;
+  totalRestMinutes: number;
+  totalWaitingMinutes: number;
+  missionCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Interface pour les temps de mission
+export interface MissionTimeEntry {
+  drivingTimeMinutes?: number;
+  restTimeMinutes?: number;
+  waitingTimeMinutes?: number;
+  drivingTimeComment?: string;
 }
 
 class DatabaseService {
@@ -144,6 +184,18 @@ class DatabaseService {
     }
   }
 
+  async forceMigrations() {
+    try {
+      console.log('🔄 Forcer les migrations de la base de données...');
+      await this.migrateDatabase();
+      await this.debugTableStructure();
+      console.log('✅ Migrations forcées terminées');
+    } catch (error) {
+      console.error('❌ Erreur lors des migrations forcées:', error);
+      throw error;
+    }
+  }
+
   private async debugTableStructure() {
     if (!this.db) return;
     
@@ -178,6 +230,103 @@ class DatabaseService {
       if (!hasVehicleId) {
         console.log('🔄 Migration: Ajout de la colonne vehicleId à la table missions');
         await this.db.execAsync(`ALTER TABLE missions ADD COLUMN vehicleId TEXT`);
+      }
+
+      // Vérifier et ajouter les colonnes kilométriques
+      const hasKmDepotStart = missionsTableInfo.some(column => column.name === 'kmDepotStart');
+      const hasKmMissionStart = missionsTableInfo.some(column => column.name === 'kmMissionStart');
+      const hasKmMissionEnd = missionsTableInfo.some(column => column.name === 'kmMissionEnd');
+      const hasKmDepotEnd = missionsTableInfo.some(column => column.name === 'kmDepotEnd');
+      const hasDistanceDepotToDepot = missionsTableInfo.some(column => column.name === 'distanceDepotToDepot');
+      const hasDistanceMissionOnly = missionsTableInfo.some(column => column.name === 'distanceMissionOnly');
+
+      if (!hasKmDepotStart) {
+        console.log('🔄 Migration: Ajout de la colonne kmDepotStart à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN kmDepotStart REAL`);
+      }
+
+      if (!hasKmMissionStart) {
+        console.log('🔄 Migration: Ajout de la colonne kmMissionStart à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN kmMissionStart REAL`);
+      }
+
+      if (!hasKmMissionEnd) {
+        console.log('🔄 Migration: Ajout de la colonne kmMissionEnd à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN kmMissionEnd REAL`);
+      }
+
+      if (!hasKmDepotEnd) {
+        console.log('🔄 Migration: Ajout de la colonne kmDepotEnd à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN kmDepotEnd REAL`);
+      }
+
+      if (!hasDistanceDepotToDepot) {
+        console.log('🔄 Migration: Ajout de la colonne distanceDepotToDepot à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN distanceDepotToDepot REAL`);
+      }
+
+      if (!hasDistanceMissionOnly) {
+        console.log('🔄 Migration: Ajout de la colonne distanceMissionOnly à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN distanceMissionOnly REAL`);
+      }
+
+      // Migrations pour les colonnes de temps de travail
+      const hasDrivingTimeMinutes = missionsTableInfo.some(column => column.name === 'drivingTimeMinutes');
+      const hasRestTimeMinutes = missionsTableInfo.some(column => column.name === 'restTimeMinutes');
+      const hasWaitingTimeMinutes = missionsTableInfo.some(column => column.name === 'waitingTimeMinutes');
+      const hasDrivingTimeComment = missionsTableInfo.some(column => column.name === 'drivingTimeComment');
+
+      if (!hasDrivingTimeMinutes) {
+        console.log('🔄 Migration: Ajout de la colonne drivingTimeMinutes à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN drivingTimeMinutes INTEGER`);
+      }
+
+      if (!hasRestTimeMinutes) {
+        console.log('🔄 Migration: Ajout de la colonne restTimeMinutes à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN restTimeMinutes INTEGER`);
+      }
+
+      if (!hasWaitingTimeMinutes) {
+        console.log('🔄 Migration: Ajout de la colonne waitingTimeMinutes à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN waitingTimeMinutes INTEGER`);
+      }
+
+      if (!hasDrivingTimeComment) {
+        console.log('🔄 Migration: Ajout de la colonne drivingTimeComment à la table missions');
+        await this.db.execAsync(`ALTER TABLE missions ADD COLUMN drivingTimeComment TEXT`);
+      }
+
+      // Vérifier si la table driver_work_times existe
+      const workTimesTableExists = await this.db.getAllAsync<{ name: string }>(`
+        SELECT name FROM sqlite_master WHERE type='table' AND name='driver_work_times'
+      `);
+      
+      if (workTimesTableExists.length === 0) {
+        console.log('🔄 Migration: Création de la table driver_work_times');
+        await this.db.execAsync(`
+          CREATE TABLE driver_work_times (
+            id TEXT PRIMARY KEY,
+            driverId TEXT NOT NULL,
+            year INTEGER NOT NULL,
+            month INTEGER NOT NULL,
+            day INTEGER NOT NULL,
+            totalDrivingMinutes INTEGER NOT NULL DEFAULT 0,
+            totalRestMinutes INTEGER NOT NULL DEFAULT 0,
+            totalWaitingMinutes INTEGER NOT NULL DEFAULT 0,
+            missionCount INTEGER NOT NULL DEFAULT 0,
+            createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (driverId) REFERENCES users(id),
+            UNIQUE(driverId, year, month, day)
+          );
+        `);
+        
+        // Ajouter les index pour la table driver_work_times
+        await this.db.execAsync(`
+          CREATE INDEX IF NOT EXISTS idx_work_times_driver ON driver_work_times(driverId);
+          CREATE INDEX IF NOT EXISTS idx_work_times_period ON driver_work_times(year, month);
+          CREATE INDEX IF NOT EXISTS idx_work_times_day ON driver_work_times(driverId, year, month, day);
+        `);
       }
 
       // Vérifier les colonnes de la table users
@@ -296,6 +445,16 @@ class DatabaseService {
         driverId TEXT NOT NULL,
         companyId TEXT NOT NULL,
         vehicleId TEXT,
+        kmDepotStart REAL,
+        kmMissionStart REAL,
+        kmMissionEnd REAL,
+        kmDepotEnd REAL,
+        distanceDepotToDepot REAL,
+        distanceMissionOnly REAL,
+        drivingTimeMinutes INTEGER,
+        restTimeMinutes INTEGER,
+        waitingTimeMinutes INTEGER,
+        drivingTimeComment TEXT,
         createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (driverId) REFERENCES users(id),
@@ -325,6 +484,25 @@ class DatabaseService {
       );
     `);
 
+    // Table de suivi des temps de travail par chauffeur et mois
+    await this.db.execAsync(`
+      CREATE TABLE IF NOT EXISTS driver_work_times (
+        id TEXT PRIMARY KEY,
+        driverId TEXT NOT NULL,
+        year INTEGER NOT NULL,
+        month INTEGER NOT NULL,
+        day INTEGER NOT NULL,
+        totalDrivingMinutes INTEGER NOT NULL DEFAULT 0,
+        totalRestMinutes INTEGER NOT NULL DEFAULT 0,
+        totalWaitingMinutes INTEGER NOT NULL DEFAULT 0,
+        missionCount INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (driverId) REFERENCES users(id),
+        UNIQUE(driverId, year, month, day)
+      );
+    `);
+
     // Index pour les performances
     await this.db.execAsync(`
       CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
@@ -336,6 +514,9 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_vehicles_plate ON vehicles(licensePlate);
       CREATE INDEX IF NOT EXISTS idx_vehicles_fleet ON vehicles(fleetNumber);
       CREATE INDEX IF NOT EXISTS idx_vehicles_active ON vehicles(isActive);
+      CREATE INDEX IF NOT EXISTS idx_work_times_driver ON driver_work_times(driverId);
+      CREATE INDEX IF NOT EXISTS idx_work_times_period ON driver_work_times(year, month);
+      CREATE INDEX IF NOT EXISTS idx_work_times_day ON driver_work_times(driverId, year, month, day);
     `);
   }
 
@@ -765,8 +946,9 @@ class DatabaseService {
         arrivalLocation, arrivalAddress, arrivalLat, arrivalLng, 
         estimatedArrivalAt, actualArrivalAt, routePolyline, distance, 
         estimatedDuration, maxPassengers, currentPassengers, driverId, 
-        companyId, vehicleId, createdAt, updatedAt
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        companyId, vehicleId, kmDepotStart, kmMissionStart, kmMissionEnd, 
+        kmDepotEnd, distanceDepotToDepot, distanceMissionOnly, createdAt, updatedAt
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         mission.id, 
         mission.title, 
@@ -792,10 +974,196 @@ class DatabaseService {
         mission.driverId,
         mission.companyId,
         mission.vehicleId || null,
+        mission.kmDepotStart || null,
+        mission.kmMissionStart || null,
+        mission.kmMissionEnd || null,
+        mission.kmDepotEnd || null,
+        mission.distanceDepotToDepot || null,
+        mission.distanceMissionOnly || null,
         mission.createdAt, 
         mission.updatedAt
       ]
     );
+  }
+
+  async updateMission(id: string, missionData: Partial<Mission>): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    // Construction dynamique de la requête UPDATE
+    const updateFields: string[] = [];
+    const updateValues: any[] = [];
+
+    // Champs pouvant être mis à jour
+    const updatableFields = [
+      'title', 'description', 'status', 'departureLocation', 'departureAddress',
+      'departureLat', 'departureLng', 'scheduledDepartureAt', 'actualDepartureAt',
+      'arrivalLocation', 'arrivalAddress', 'arrivalLat', 'arrivalLng',
+      'estimatedArrivalAt', 'actualArrivalAt', 'routePolyline', 'distance',
+      'estimatedDuration', 'maxPassengers', 'currentPassengers', 'vehicleId',
+      'kmDepotStart', 'kmMissionStart', 'kmMissionEnd', 'kmDepotEnd',
+      'distanceDepotToDepot', 'distanceMissionOnly'
+    ];
+
+    // Ajout des champs à mettre à jour
+    updatableFields.forEach(field => {
+      if (missionData.hasOwnProperty(field)) {
+        updateFields.push(`${field} = ?`);
+        updateValues.push((missionData as any)[field]);
+      }
+    });
+
+    if (updateFields.length === 0) {
+      throw new Error('Aucun champ à mettre à jour');
+    }
+
+    // Toujours mettre à jour updatedAt
+    updateFields.push('updatedAt = CURRENT_TIMESTAMP');
+
+    // Ajout de l'ID à la fin pour la clause WHERE
+    updateValues.push(id);
+
+    const query = `UPDATE missions SET ${updateFields.join(', ')} WHERE id = ?`;
+    
+    await this.db.runAsync(query, updateValues);
+  }
+
+  // Méthodes pour les temps de travail
+  async updateMissionTimes(missionId: string, timeData: MissionTimeEntry): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    // Mettre à jour les temps dans la mission
+    const updateFields: string[] = [];
+    const updateValues: any[] = [];
+
+    if (timeData.drivingTimeMinutes !== undefined) {
+      updateFields.push('drivingTimeMinutes = ?');
+      updateValues.push(timeData.drivingTimeMinutes);
+    }
+    if (timeData.restTimeMinutes !== undefined) {
+      updateFields.push('restTimeMinutes = ?');
+      updateValues.push(timeData.restTimeMinutes);
+    }
+    if (timeData.waitingTimeMinutes !== undefined) {
+      updateFields.push('waitingTimeMinutes = ?');
+      updateValues.push(timeData.waitingTimeMinutes);
+    }
+    if (timeData.drivingTimeComment !== undefined) {
+      updateFields.push('drivingTimeComment = ?');
+      updateValues.push(timeData.drivingTimeComment);
+    }
+
+    if (updateFields.length === 0) {
+      return; // Rien à mettre à jour
+    }
+
+    updateFields.push('updatedAt = CURRENT_TIMESTAMP');
+    updateValues.push(missionId);
+
+    const query = `UPDATE missions SET ${updateFields.join(', ')} WHERE id = ?`;
+    await this.db.runAsync(query, updateValues);
+
+    // Recalculer les agrégations pour le chauffeur
+    await this.updateDriverWorkTimeAggregations(missionId);
+  }
+
+  async updateDriverWorkTimeAggregations(missionId: string): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    // Récupérer les informations de la mission
+    const mission = await this.db.getFirstAsync<Mission>(
+      'SELECT driverId, scheduledDepartureAt, drivingTimeMinutes, restTimeMinutes, waitingTimeMinutes FROM missions WHERE id = ?',
+      [missionId]
+    );
+
+    if (!mission) return;
+
+    const missionDate = new Date(mission.scheduledDepartureAt);
+    const year = missionDate.getFullYear();
+    const month = missionDate.getMonth() + 1;
+    const day = missionDate.getDate();
+
+    // Calculer les totaux pour ce jour
+    const totals = await this.db.getFirstAsync<{
+      totalDriving: number;
+      totalRest: number;
+      totalWaiting: number;
+      missionCount: number;
+    }>(`
+      SELECT 
+        COALESCE(SUM(drivingTimeMinutes), 0) as totalDriving,
+        COALESCE(SUM(restTimeMinutes), 0) as totalRest,
+        COALESCE(SUM(waitingTimeMinutes), 0) as totalWaiting,
+        COUNT(*) as missionCount
+      FROM missions 
+      WHERE driverId = ? 
+        AND date(scheduledDepartureAt) = date(?)
+        AND status = 'COMPLETED'
+    `, [mission.driverId, mission.scheduledDepartureAt]);
+
+    if (!totals) return;
+
+    // Insérer ou mettre à jour l'agrégation pour ce jour
+    await this.db.runAsync(`
+      INSERT OR REPLACE INTO driver_work_times (
+        id, driverId, year, month, day,
+        totalDrivingMinutes, totalRestMinutes, totalWaitingMinutes, missionCount,
+        createdAt, updatedAt
+      ) VALUES (
+        ?, ?, ?, ?, ?,
+        ?, ?, ?, ?,
+        COALESCE((SELECT createdAt FROM driver_work_times WHERE driverId = ? AND year = ? AND month = ? AND day = ?), CURRENT_TIMESTAMP),
+        CURRENT_TIMESTAMP
+      )
+    `, [
+      `${mission.driverId}_${year}_${month}_${day}`,
+      mission.driverId, year, month, day,
+      totals.totalDriving, totals.totalRest, totals.totalWaiting, totals.missionCount,
+      mission.driverId, year, month, day
+    ]);
+  }
+
+  async getDriverWorkTimesByMonth(driverId: string, year: number, month: number): Promise<DriverWorkTime[]> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    return await this.db.getAllAsync<DriverWorkTime>(
+      'SELECT * FROM driver_work_times WHERE driverId = ? AND year = ? AND month = ? ORDER BY day',
+      [driverId, year, month]
+    );
+  }
+
+  async getDriverWorkTimesTotals(driverId: string, year: number, month: number): Promise<{
+    totalDrivingMinutes: number;
+    totalRestMinutes: number;
+    totalWaitingMinutes: number;
+    totalMissions: number;
+    workingDays: number;
+  }> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const result = await this.db.getFirstAsync<{
+      totalDrivingMinutes: number;
+      totalRestMinutes: number;
+      totalWaitingMinutes: number;
+      totalMissions: number;
+      workingDays: number;
+    }>(`
+      SELECT 
+        COALESCE(SUM(totalDrivingMinutes), 0) as totalDrivingMinutes,
+        COALESCE(SUM(totalRestMinutes), 0) as totalRestMinutes,
+        COALESCE(SUM(totalWaitingMinutes), 0) as totalWaitingMinutes,
+        COALESCE(SUM(missionCount), 0) as totalMissions,
+        COUNT(*) as workingDays
+      FROM driver_work_times 
+      WHERE driverId = ? AND year = ? AND month = ?
+    `, [driverId, year, month]);
+
+    return result || {
+      totalDrivingMinutes: 0,
+      totalRestMinutes: 0,
+      totalWaitingMinutes: 0,
+      totalMissions: 0,
+      workingDays: 0
+    };
   }
 
   // Méthodes pour les compagnies
@@ -1077,3 +1445,13 @@ class DatabaseService {
 }
 
 export const databaseService = new DatabaseService();
+
+// Fonction utilitaire pour forcer les migrations (pour débug)
+export const forceDatabaseMigrations = async () => {
+  await databaseService.forceMigrations();
+};
+
+// Fonction utilitaire pour réinitialiser la base de données (pour débug)
+export const resetDatabase = async () => {
+  await databaseService.resetDatabase();
+};

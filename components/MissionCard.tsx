@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import { Card, CardHeader, CardContent, CardFooter } from './ui/Card';
 import { Button } from './ui/Button';
+import { MissionPdfButton } from './MissionPdfButton';
 import { Colors, getMissionStatusColor } from '../constants/Colors';
 import { Mission } from '../lib/types';
 import { DateUtils } from '../utils/dateUtils';
@@ -17,6 +18,10 @@ interface MissionCardProps {
   onPress?: () => void;
   onUpdateStatus?: (status: string) => void;
   showActions?: boolean;
+  showPdfActions?: boolean;
+  companyName?: string;
+  driverName?: string;
+  vehicleInfo?: string;
 }
 
 export function MissionCard({
@@ -24,6 +29,10 @@ export function MissionCard({
   onPress,
   onUpdateStatus,
   showActions = true,
+  showPdfActions = true,
+  companyName = 'Entreprise inconnue',
+  driverName = 'Chauffeur non assigné',
+  vehicleInfo = 'Véhicule non assigné',
 }: MissionCardProps) {
   const colors = Colors.light;
   const statusColor = getMissionStatusColor(mission.status);
@@ -57,6 +66,14 @@ export function MissionCard({
   const canStart = mission.status === 'PENDING' && DateUtils.isFuture(mission.scheduledDepartureAt);
   const canComplete = mission.status === 'IN_PROGRESS';
 
+  // Préparation des données PDF
+  const pdfData = {
+    mission,
+    companyName,
+    driverName,
+    vehicleInfo
+  };
+
   return (
     <Card
       variant="elevated"
@@ -66,12 +83,28 @@ export function MissionCard({
     >
       <CardHeader
         title={mission.title}
-        subtitle={mission.company.name}
+        subtitle={companyName}
         action={
-          <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
-            <Text style={styles.statusText}>
-              {getStatusText(mission.status)}
-            </Text>
+          <View style={styles.headerActions}>
+            {showPdfActions && (
+              <View style={styles.pdfActions}>
+                <MissionPdfButton 
+                  missionData={pdfData} 
+                  variant="share"
+                  iconSize={16}
+                />
+                <MissionPdfButton 
+                  missionData={pdfData} 
+                  variant="print"
+                  iconSize={16}
+                />
+              </View>
+            )}
+            <View style={[styles.statusBadge, { backgroundColor: statusColor }]}>
+              <Text style={styles.statusText}>
+                {getStatusText(mission.status)}
+              </Text>
+            </View>
           </View>
         }
       />
@@ -284,5 +317,13 @@ const styles = StyleSheet.create({
   actionButton: {
     flex: 1,
     marginHorizontal: 4,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pdfActions: {
+    flexDirection: 'row',
+    marginRight: 8,
   },
 });

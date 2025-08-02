@@ -9,6 +9,7 @@ import {
     View,
 } from 'react-native';
 import { MissionCard } from '../../components/MissionCard-local';
+import { DatabaseDebugPanel } from '../../components/DatabaseDebugPanel';
 import { Button } from '../../components/ui/Button';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
@@ -39,6 +40,9 @@ export default function DashboardScreen() {
             Voici votre tableau de bord
           </Text>
         </View>
+
+        {/* Panneau de debug temporaire pour les migrations DB */}
+        <DatabaseDebugPanel />
 
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
