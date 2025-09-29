@@ -7,7 +7,7 @@ import {
   ScrollView,
   Alert,
 } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useMissions } from '../../hooks/useMissions-local';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { Button } from '../../components/ui/Button';
@@ -41,6 +41,13 @@ export default function AllMissionsScreen() {
   React.useEffect(() => {
     loadDrivers();
   }, []);
+
+  // Recharger les missions quand la page reprend le focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadMissions();
+    }, [])
+  );
 
   const handleDeleteMission = async (missionId: string, missionTitle: string) => {
     Alert.alert(
@@ -76,6 +83,16 @@ export default function AllMissionsScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.scrollView}>
+        {/* Bouton de retour vers la page principale */}
+        <View style={styles.navigationHeader}>
+          <Button
+            title="← Retour au tableau de bord"
+            onPress={() => router.push('/(tabs)/' as any)}
+            variant="ghost"
+            style={styles.backButton}
+          />
+        </View>
+
         <View style={styles.header}>
           <Text style={[styles.title, { color: colors.text }]}>
             Toutes les Missions
@@ -229,6 +246,15 @@ const styles = StyleSheet.create({
   },
   scrollView: {
     flex: 1,
+  },
+  navigationHeader: {
+    padding: 16,
+    paddingBottom: 8,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   header: {
     padding: 16,

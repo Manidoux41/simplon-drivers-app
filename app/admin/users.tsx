@@ -19,9 +19,11 @@ import { PhoneButton } from '../../components/ui/PhoneButton';
 
 export default function UsersManagement() {
   const router = useRouter();
-  const { users, loading, error, createUser, updateUserRole, updateUserStatus, deleteUser } = useUsers();
+  const { users, loading, error, createUser, updateUserRole, updateUserStatus, deleteUser, updateUser } = useUsers();
   
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
   const [formData, setFormData] = useState({
     email: '',
     firstName: '',
@@ -91,6 +93,78 @@ export default function UsersManagement() {
     );
   };
 
+  const handleEditUser = (user: User) => {
+    setEditingUser(user);
+    setFormData({
+      email: user.email,
+      firstName: user.firstName,
+      lastName: user.lastName,
+      licenseNumber: user.licenseNumber,
+      phoneNumber: user.phoneNumber || '',
+      role: user.role,
+      password: '', // Ne pas pré-remplir le mot de passe
+    });
+    setShowEditForm(true);
+    setShowCreateForm(false);
+  };
+
+  const handleUpdateUser = async () => {
+    if (!editingUser) return;
+    
+    if (!formData.firstName || !formData.lastName || !formData.email || !formData.licenseNumber) {
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
+      return;
+    }
+
+    console.log('🔄 Modification utilisateur:', {
+      userId: editingUser.id,
+      changes: {
+        firstName: formData.firstName,
+        lastName: formData.lastName,
+        email: formData.email,
+        licenseNumber: formData.licenseNumber,
+        phoneNumber: formData.phoneNumber,
+      }
+    });
+
+    const success = await updateUser(editingUser.id, {
+      firstName: formData.firstName,
+      lastName: formData.lastName,
+      email: formData.email,
+      licenseNumber: formData.licenseNumber,
+      phoneNumber: formData.phoneNumber || undefined,
+    });
+
+    if (success) {
+      Alert.alert('Succès', 'Utilisateur modifié avec succès');
+      setShowEditForm(false);
+      setEditingUser(null);
+      setFormData({
+        email: '',
+        firstName: '',
+        lastName: '',
+        licenseNumber: '',
+        phoneNumber: '',
+        role: 'DRIVER',
+        password: '',
+      });
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setShowEditForm(false);
+    setEditingUser(null);
+    setFormData({
+      email: '',
+      firstName: '',
+      lastName: '',
+      licenseNumber: '',
+      phoneNumber: '',
+      role: 'DRIVER',
+      password: '',
+    });
+  };
+
   const handleDeleteUser = (user: User) => {
     Alert.alert(
       'Supprimer l\'utilisateur',
@@ -133,10 +207,16 @@ export default function UsersManagement() {
       
       {/* Bouton de retour et d'ajout */}
       <View style={styles.actionBar}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Ionicons name="arrow-back" size={24} color={Colors.light.text} />
-          <Text style={styles.backText}>Retour</Text>
-        </TouchableOpacity>
+        <View style={styles.navigationButtons}>
+          <TouchableOpacity onPress={() => router.push('/(tabs)/' as any)} style={styles.homeButton}>
+            <Ionicons name="home" size={20} color={Colors.light.primary} />
+            <Text style={[styles.backText, { color: Colors.light.primary }]}>Accueil</Text>
+          </TouchableOpacity>
+          <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={24} color={Colors.light.text} />
+            <Text style={styles.backText}>Retour</Text>
+          </TouchableOpacity>
+        </View>
         <TouchableOpacity 
           onPress={() => setShowCreateForm(!showCreateForm)}
           style={styles.addButton}
@@ -248,6 +328,72 @@ export default function UsersManagement() {
           </View>
         )}
 
+        {/* Formulaire de modification */}
+        {showEditForm && editingUser && (
+          <View style={styles.createForm}>
+            <Text style={styles.formTitle}>
+              Modifier l'utilisateur: {editingUser.firstName} {editingUser.lastName}
+            </Text>
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Prénom *"
+              value={formData.firstName}
+              onChangeText={(text) => setFormData({ ...formData, firstName: text })}
+              placeholderTextColor={Colors.light.textSecondary}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Nom *"
+              value={formData.lastName}
+              onChangeText={(text) => setFormData({ ...formData, lastName: text })}
+              placeholderTextColor={Colors.light.textSecondary}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Email *"
+              value={formData.email}
+              onChangeText={(text) => setFormData({ ...formData, email: text })}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              placeholderTextColor={Colors.light.textSecondary}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Numéro de permis *"
+              value={formData.licenseNumber}
+              onChangeText={(text) => setFormData({ ...formData, licenseNumber: text })}
+              placeholderTextColor={Colors.light.textSecondary}
+            />
+            
+            <TextInput
+              style={styles.input}
+              placeholder="Numéro de téléphone (optionnel)"
+              value={formData.phoneNumber}
+              onChangeText={(text) => setFormData({ ...formData, phoneNumber: text })}
+              keyboardType="phone-pad"
+              placeholderTextColor={Colors.light.textSecondary}
+            />
+
+            <View style={styles.formButtons}>
+              <Button
+                title="Annuler"
+                onPress={handleCancelEdit}
+                variant="ghost"
+                style={styles.cancelButton}
+              />
+              <Button
+                title="Sauvegarder"
+                onPress={handleUpdateUser}
+                style={styles.createButton}
+              />
+            </View>
+          </View>
+        )}
+
         {/* Liste des utilisateurs */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
@@ -292,6 +438,13 @@ export default function UsersManagement() {
               </View>
 
               <View style={styles.userActions}>
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleEditUser(user)}
+                >
+                  <Ionicons name="create-outline" size={20} color="#0ea5e9" />
+                </TouchableOpacity>
+                
                 <TouchableOpacity
                   style={styles.actionButton}
                   onPress={() => handleToggleRole(user)}
@@ -358,6 +511,15 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     fontSize: 16,
     color: Colors.light.text,
+  },
+  navigationButtons: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  homeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
   },
   addButton: {
     flexDirection: 'row',

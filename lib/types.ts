@@ -24,7 +24,7 @@ export interface Mission {
   id: string;
   title: string;
   description?: string;
-  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  status: 'PENDING' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
   
   // Departure information
   departureLocation: string;

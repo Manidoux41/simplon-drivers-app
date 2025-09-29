@@ -3,6 +3,7 @@ import { Text } from 'react-native';
 import { Tabs } from 'expo-router';
 import { useAuth } from '../../hooks/useAuth-local';
 import { Colors } from '../../constants/Colors';
+import { NotificationBell } from '../../components/NotificationBell';
 
 // Composant pour les icônes temporaires
 function TabBarIcon({ emoji, color }: { emoji: string; color: string }) {
@@ -26,6 +27,7 @@ export default function TabLayout() {
           backgroundColor: colors.primary,
         },
         headerTintColor: colors.textOnPrimary,
+        headerRight: () => <NotificationBell />,
         headerTitleStyle: {
           fontWeight: 'bold',
         },

@@ -1,6 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { databaseService, Mission, Company } from '../lib/database';
 import { authService } from '../lib/auth-local';
+import { missionEventBus } from '../services/MissionEventBus';
 
 export function useMissions() {
   const [missions, setMissions] = useState<Mission[]>([]);
@@ -8,7 +9,7 @@ export function useMissions() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const loadMissions = async () => {
+  const loadMissions = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -44,7 +45,7 @@ export function useMissions() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   const updateMissionStatus = async (missionId: string, status: string) => {
     try {
@@ -108,6 +109,54 @@ export function useMissions() {
     loadMissions();
   }, []);
 
+  // Écouter les changements de missions via l'event bus
+  useEffect(() => {
+    const handleMissionChange = () => {
+      console.log('🔄 useMissions: Rechargement automatique des missions suite à un changement');
+      loadMissions();
+    };
+
+    missionEventBus.subscribe(handleMissionChange);
+
+    return () => {
+      missionEventBus.unsubscribe(handleMissionChange);
+    };
+  }, [loadMissions]);
+
+  // Fonctions de confirmation de mission
+  const acceptMission = async (missionId: string) => {
+    try {
+      await databaseService.updateMission(missionId, { 
+        status: 'ASSIGNED'
+      });
+      await loadMissions();
+    } catch (err) {
+      console.error('Erreur acceptation mission:', err);
+      throw err;
+    }
+  };
+
+  const refuseMission = async (missionId: string) => {
+    try {
+      await databaseService.updateMission(missionId, { 
+        driverId: '',
+        status: 'PENDING'
+      });
+      await loadMissions();
+    } catch (err) {
+      console.error('Erreur refus mission:', err);
+      throw err;
+    }
+  };
+
+  // Obtenir les missions en attente de confirmation pour l'utilisateur actuel
+  const getPendingConfirmationMissions = () => {
+    return missions.filter(mission => 
+      mission.status === 'PENDING' && 
+      mission.driverId // Mission assignée mais en attente de confirmation
+    );
+  };
+
   return {
     missions,
     companies,
@@ -121,5 +170,8 @@ export function useMissions() {
     getInProgressMissions,
     getCompletedMissions,
     getPendingMissions,
+    acceptMission,
+    refuseMission,
+    getPendingConfirmationMissions,
   };
 }

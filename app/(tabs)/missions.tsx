@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useMissions } from '../../hooks/useMissions-local';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
@@ -9,8 +9,15 @@ import { Colors } from '../../constants/Colors';
 
 export default function MissionsScreen() {
   const router = useRouter();
-  const { missions, companies, loading } = useMissions();
+  const { missions, companies, loading, loadMissions } = useMissions();
   const colors = Colors.light;
+
+  // Recharger les missions quand la page reprend le focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadMissions();
+    }, [])
+  );
 
   if (loading) {
     return (

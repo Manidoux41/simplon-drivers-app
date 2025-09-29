@@ -72,6 +72,14 @@ export default function AdminDashboard() {
       color: '#8b5cf6',
       route: '/admin/map-test',
     },
+    {
+      id: 'test-mission-confirmation',
+      title: 'Test Confirmation Mission',
+      description: 'Tester le système de confirmation de mission',
+      icon: 'checkmark-circle' as const,
+      color: '#ef4444',
+      route: '/admin/test-mission-confirmation',
+    },
   ];
 
   const handleActionPress = (route: string) => {

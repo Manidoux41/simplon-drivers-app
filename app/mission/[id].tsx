@@ -128,6 +128,16 @@ export default function MissionDetailScreen() {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+        {/* Bouton de retour vers la page principale */}
+        <View style={styles.navigationHeader}>
+          <Button
+            title="← Retour au tableau de bord"
+            onPress={() => router.push('/(tabs)/' as any)}
+            variant="ghost"
+            style={styles.backButton}
+          />
+        </View>
+
         {/* En-tête avec statut */}
         <Card variant="elevated" style={styles.headerCard}>
           <CardHeader
@@ -163,7 +173,8 @@ export default function MissionDetailScreen() {
                   address: mission.arrivalAddress,
                 }}
                 routePolyline={mission.routePolyline}
-                height={250}
+                height={300}
+                showFullMap={true}
                 style={styles.map}
               />
             </View>
@@ -529,6 +540,14 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     padding: 16,
+  },
+  navigationHeader: {
+    marginBottom: 12,
+  },
+  backButton: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
   },
   headerCard: {
     marginBottom: 16,

@@ -78,6 +78,28 @@ export function useUsers() {
     }
   };
 
+  const updateUser = async (userId: string, userData: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    licenseNumber?: string;
+    phoneNumber?: string;
+  }) => {
+    try {
+      await databaseService.updateUser(userId, userData);
+      await loadUsers(); // Recharger la liste
+      
+      // Notifier les autres composants
+      console.log('🔔 Utilisateur modifié, notification des autres composants');
+      driversState.notify();
+      
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur lors de la modification de l\'utilisateur');
+      return false;
+    }
+  };
+
   const deleteUser = async (userId: string) => {
     try {
       await databaseService.deleteUser(userId);
@@ -104,6 +126,7 @@ export function useUsers() {
     error,
     loadUsers,
     createUser,
+    updateUser,
     updateUserRole,
     updateUserStatus,
     deleteUser,

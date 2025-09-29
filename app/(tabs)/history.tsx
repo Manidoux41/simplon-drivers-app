@@ -1,5 +1,6 @@
 import React from 'react';
 import { View, Text, StyleSheet, SafeAreaView, ScrollView } from 'react-native';
+import { useFocusEffect } from 'expo-router';
 import { useMissions } from '../../hooks/useMissions-local';
 import { Card, CardContent, CardHeader } from '../../components/ui/Card';
 import { LoadingSpinner } from '../../components/ui/LoadingSpinner';
@@ -7,8 +8,15 @@ import { Colors } from '../../constants/Colors';
 import { DateUtils } from '../../utils/dateUtils';
 
 export default function HistoryScreen() {
-  const { missions, companies, loading } = useMissions();
+  const { missions, companies, loading, loadMissions } = useMissions();
   const colors = Colors.light;
+
+  // Recharger les missions quand la page reprend le focus
+  useFocusEffect(
+    React.useCallback(() => {
+      loadMissions();
+    }, [])
+  );
 
   if (loading) {
     return (

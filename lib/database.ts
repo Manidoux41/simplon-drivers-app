@@ -49,7 +49,7 @@ export interface Mission {
   id: string;
   title: string;
   description?: string;
-  status: 'PENDING' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
+  status: 'PENDING' | 'ASSIGNED' | 'IN_PROGRESS' | 'COMPLETED' | 'CANCELLED';
   departureLocation: string;
   departureAddress: string;
   departureLat: number;
@@ -296,6 +296,23 @@ class DatabaseService {
         await this.db.execAsync(`ALTER TABLE missions ADD COLUMN drivingTimeComment TEXT`);
       }
 
+      // Migration pour ajouter le statut ASSIGNED et permettre driverId NULL
+      console.log('🔄 Migration: Vérification du statut ASSIGNED et driverId nullable');
+      try {
+        // Tenter de créer une mission avec le statut ASSIGNED pour tester
+        await this.db.runAsync(`INSERT OR IGNORE INTO missions (id, title, status, driverId, departureLocation, departureAddress, departureLat, departureLng, scheduledDepartureAt, arrivalLocation, arrivalAddress, arrivalLat, arrivalLng, estimatedArrivalAt, maxPassengers, companyId) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ['test-assigned-status', 'Test ASSIGNED Status', 'ASSIGNED', null, 'Test', 'Test', 0, 0, new Date().toISOString(), 'Test', 'Test', 0, 0, new Date().toISOString(), 1, 'test-company']
+        );
+        // Si ça marche, supprimer le test
+        await this.db.runAsync(`DELETE FROM missions WHERE id = ?`, ['test-assigned-status']);
+        console.log('✅ Migration: Statut ASSIGNED et driverId nullable déjà supportés');
+      } catch (error) {
+        console.log('🔄 Migration: Mise à jour nécessaire pour ASSIGNED et driverId nullable');
+        // Si ça échoue, il faut recréer la table
+        // Recréer la table missions avec la nouvelle structure
+        await this.recreateMissionsTable();
+      }
+
       // Vérifier si la table driver_work_times existe
       const workTimesTableExists = await this.db.getAllAsync<{ name: string }>(`
         SELECT name FROM sqlite_master WHERE type='table' AND name='driver_work_times'
@@ -424,7 +441,7 @@ class DatabaseService {
         id TEXT PRIMARY KEY,
         title TEXT NOT NULL,
         description TEXT,
-        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')),
+        status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')),
         departureLocation TEXT NOT NULL,
         departureAddress TEXT NOT NULL,
         departureLat REAL NOT NULL,
@@ -442,7 +459,7 @@ class DatabaseService {
         estimatedDuration INTEGER,
         maxPassengers INTEGER NOT NULL,
         currentPassengers INTEGER NOT NULL DEFAULT 0,
-        driverId TEXT NOT NULL,
+        driverId TEXT,
         companyId TEXT NOT NULL,
         vehicleId TEXT,
         kmDepotStart REAL,
@@ -457,7 +474,7 @@ class DatabaseService {
         drivingTimeComment TEXT,
         createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (driverId) REFERENCES users(id),
+        FOREIGN KEY (driverId) REFERENCES users(id) ON DELETE SET NULL,
         FOREIGN KEY (companyId) REFERENCES companies(id),
         FOREIGN KEY (vehicleId) REFERENCES vehicles(id)
       );
@@ -501,6 +518,21 @@ class DatabaseService {
         FOREIGN KEY (driverId) REFERENCES users(id),
         UNIQUE(driverId, year, month, day)
       );
+
+      CREATE TABLE IF NOT EXISTS notifications (
+        id TEXT PRIMARY KEY,
+        userId TEXT NOT NULL,
+        type TEXT NOT NULL,
+        title TEXT NOT NULL,
+        message TEXT NOT NULL,
+        missionId TEXT,
+        missionTitle TEXT,
+        isRead INTEGER NOT NULL DEFAULT 0,
+        requiresAction INTEGER NOT NULL DEFAULT 0,
+        createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (userId) REFERENCES users(id),
+        FOREIGN KEY (missionId) REFERENCES missions(id)
+      );
     `);
 
     // Index pour les performances
@@ -513,6 +545,8 @@ class DatabaseService {
       CREATE INDEX IF NOT EXISTS idx_missions_status ON missions(status);
       CREATE INDEX IF NOT EXISTS idx_vehicles_plate ON vehicles(licensePlate);
       CREATE INDEX IF NOT EXISTS idx_vehicles_fleet ON vehicles(fleetNumber);
+      CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(userId);
+      CREATE INDEX IF NOT EXISTS idx_notifications_mission ON notifications(missionId);
       CREATE INDEX IF NOT EXISTS idx_vehicles_active ON vehicles(isActive);
       CREATE INDEX IF NOT EXISTS idx_work_times_driver ON driver_work_times(driverId);
       CREATE INDEX IF NOT EXISTS idx_work_times_period ON driver_work_times(year, month);
@@ -882,6 +916,16 @@ class DatabaseService {
     return users;
   }
 
+  async getAdminUsers(): Promise<User[]> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const admins = await this.db.getAllAsync<User>(
+      'SELECT id, email, firstName, lastName, licenseNumber, phoneNumber, role, isActive, createdAt, updatedAt FROM users WHERE role = "ADMIN" AND isActive = 1 ORDER BY firstName, lastName'
+    );
+
+    return admins;
+  }
+
   // Méthodes pour les missions
   async getMissionsByDriverId(driverId: string): Promise<Mission[]> {
     if (!this.db) throw new Error('Base de données non initialisée');
@@ -986,8 +1030,14 @@ class DatabaseService {
     );
   }
 
-  async updateMission(id: string, missionData: Partial<Mission>): Promise<void> {
+  async updateMission(id: string, missionData: Partial<Mission>, skipNotifications: boolean = false): Promise<void> {
     if (!this.db) throw new Error('Base de données non initialisée');
+
+    // Récupérer la mission actuelle pour comparer les changements
+    const originalMission = await this.getMissionById(id);
+    if (!originalMission) {
+      throw new Error('Mission non trouvée');
+    }
 
     // Construction dynamique de la requête UPDATE
     const updateFields: string[] = [];
@@ -1000,13 +1050,13 @@ class DatabaseService {
       'arrivalLocation', 'arrivalAddress', 'arrivalLat', 'arrivalLng',
       'estimatedArrivalAt', 'actualArrivalAt', 'routePolyline', 'distance',
       'estimatedDuration', 'maxPassengers', 'currentPassengers', 'vehicleId',
-      'kmDepotStart', 'kmMissionStart', 'kmMissionEnd', 'kmDepotEnd',
+      'driverId', 'kmDepotStart', 'kmMissionStart', 'kmMissionEnd', 'kmDepotEnd',
       'distanceDepotToDepot', 'distanceMissionOnly'
     ];
 
     // Ajout des champs à mettre à jour
     updatableFields.forEach(field => {
-      if (missionData.hasOwnProperty(field)) {
+      if (missionData.hasOwnProperty(field) && (missionData as any)[field] !== undefined) {
         updateFields.push(`${field} = ?`);
         updateValues.push((missionData as any)[field]);
       }
@@ -1024,7 +1074,70 @@ class DatabaseService {
 
     const query = `UPDATE missions SET ${updateFields.join(', ')} WHERE id = ?`;
     
+    console.log('🔍 Requête SQL:', query);
+    console.log('🔍 Valeurs:', updateValues);
+    
     await this.db.runAsync(query, updateValues);
+
+    // Déclencher les notifications après la mise à jour (sauf si explicitement désactivé)
+    if (!skipNotifications) {
+      await this.handleMissionUpdateNotifications(originalMission, missionData);
+    }
+
+    // Notifier l'event bus que les missions ont changé
+    try {
+      const { missionEventBus } = await import('../services/MissionEventBus');
+      missionEventBus.notify();
+    } catch (error) {
+      console.error('Erreur lors de la notification de l\'event bus:', error);
+    }
+  }
+
+  // Gérer les notifications lors de la mise à jour d'une mission
+  private async handleMissionUpdateNotifications(originalMission: Mission, updatedData: Partial<Mission>) {
+    try {
+      // Dynamically import to avoid circular dependency
+      const { notificationService } = await import('../services/NotificationService');
+
+      // Vérifier si le chauffeur a changé
+      if (updatedData.driverId && updatedData.driverId !== originalMission.driverId) {
+        console.log(`🔄 Changement de chauffeur détecté: ${originalMission.driverId} → ${updatedData.driverId}`);
+        
+        // Nouvelle affectation - demander confirmation au lieu d'assigner directement
+        if (updatedData.driverId) {
+          console.log(`📤 Envoi de demande de confirmation à: ${updatedData.driverId}`);
+          
+          // Mettre la mission en statut PENDING et envoyer une demande de confirmation
+          await this.db!.runAsync(
+            'UPDATE missions SET status = ? WHERE id = ?',
+            ['PENDING', originalMission.id]
+          );
+          
+          await notificationService.notifyMissionPendingConfirmation(updatedData.driverId, {
+            ...originalMission,
+            ...updatedData,
+            status: 'PENDING'
+          } as Mission);
+        }
+
+        // Ancienne affectation retirée
+        if (originalMission.driverId) {
+          await notificationService.notifyMissionRemoved(originalMission.driverId, originalMission);
+        }
+      } else if (updatedData.driverId && updatedData.driverId === originalMission.driverId) {
+        // Mission mise à jour pour le même chauffeur - notification normale
+        const changes = notificationService.detectMissionChanges(originalMission, updatedData);
+        if (changes.length > 0) {
+          await notificationService.notifyMissionUpdated(updatedData.driverId, {
+            ...originalMission,
+            ...updatedData
+          } as Mission, changes);
+        }
+      }
+    } catch (error) {
+      // Ne pas faire échouer la mise à jour si les notifications échouent
+      console.error('Erreur lors de l\'envoi des notifications:', error);
+    }
   }
 
   // Méthodes pour les temps de travail
@@ -1166,6 +1279,101 @@ class DatabaseService {
     };
   }
 
+  // Méthodes pour les notifications
+  async storeNotification(notification: Omit<{
+    id: string;
+    userId: string;
+    type: string;
+    title: string;
+    message: string;
+    missionId: string;
+    missionTitle: string;
+    isRead: boolean;
+    requiresAction?: boolean;
+    createdAt: string;
+  }, 'id'>): Promise<string> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const id = Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9);
+    
+    await this.db.runAsync(
+      `INSERT INTO notifications (id, userId, type, title, message, missionId, missionTitle, isRead, requiresAction, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        notification.userId,
+        notification.type,
+        notification.title,
+        notification.message,
+        notification.missionId,
+        notification.missionTitle,
+        notification.isRead ? 1 : 0,
+        notification.requiresAction ? 1 : 0,
+        notification.createdAt
+      ]
+    );
+
+    return id;
+  }
+
+  async getNotificationsForUser(userId: string): Promise<{
+    id: string;
+    userId: string;
+    type: 'MISSION_ASSIGNED' | 'MISSION_REMOVED' | 'MISSION_UPDATED' | 'MISSION_PENDING_CONFIRMATION' | 'MISSION_REFUSED' | 'MISSION_ACCEPTED';
+    title: string;
+    message: string;
+    missionId: string;
+    missionTitle: string;
+    isRead: boolean;
+    requiresAction?: boolean;
+    createdAt: string;
+  }[]> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const notifications = await this.db.getAllAsync<{
+      id: string;
+      userId: string;
+      type: string;
+      title: string;
+      message: string;
+      missionId: string;
+      missionTitle: string;
+      isRead: number;
+      requiresAction: number;
+      createdAt: string;
+    }>(
+      'SELECT * FROM notifications WHERE userId = ? ORDER BY createdAt DESC',
+      [userId]
+    );
+
+    return notifications.map(notification => ({
+      ...notification,
+      type: notification.type as 'MISSION_ASSIGNED' | 'MISSION_REMOVED' | 'MISSION_UPDATED' | 'MISSION_PENDING_CONFIRMATION' | 'MISSION_REFUSED' | 'MISSION_ACCEPTED',
+      isRead: notification.isRead === 1,
+      requiresAction: notification.requiresAction === 1
+    }));
+  }
+
+  async markNotificationAsRead(notificationId: string): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    await this.db.runAsync(
+      'UPDATE notifications SET isRead = 1 WHERE id = ?',
+      [notificationId]
+    );
+  }
+
+  async getUnreadNotificationCount(userId: string): Promise<number> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const result = await this.db.getFirstAsync<{ count: number }>(
+      'SELECT COUNT(*) as count FROM notifications WHERE userId = ? AND isRead = 0',
+      [userId]
+    );
+
+    return result?.count || 0;
+  }
+
   // Méthodes pour les compagnies
   async getAllCompanies(): Promise<Company[]> {
     if (!this.db) throw new Error('Base de données non initialisée');
@@ -1268,6 +1476,54 @@ class DatabaseService {
       'UPDATE users SET isActive = ?, updatedAt = ? WHERE id = ?',
       [isActive ? 1 : 0, now, userId]
     );
+  }
+
+  async updateUser(userId: string, userData: {
+    firstName?: string;
+    lastName?: string;
+    email?: string;
+    licenseNumber?: string;
+    phoneNumber?: string;
+  }): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const now = new Date().toISOString();
+    const updateFields: string[] = [];
+    const updateValues: any[] = [];
+
+    // Construire la requête dynamiquement selon les champs fournis
+    if (userData.firstName !== undefined) {
+      updateFields.push('firstName = ?');
+      updateValues.push(userData.firstName);
+    }
+    if (userData.lastName !== undefined) {
+      updateFields.push('lastName = ?');
+      updateValues.push(userData.lastName);
+    }
+    if (userData.email !== undefined) {
+      updateFields.push('email = ?');
+      updateValues.push(userData.email);
+    }
+    if (userData.licenseNumber !== undefined) {
+      updateFields.push('licenseNumber = ?');
+      updateValues.push(userData.licenseNumber);
+    }
+    if (userData.phoneNumber !== undefined) {
+      updateFields.push('phoneNumber = ?');
+      updateValues.push(userData.phoneNumber);
+    }
+
+    if (updateFields.length === 0) {
+      throw new Error('Aucune donnée à mettre à jour');
+    }
+
+    updateFields.push('updatedAt = ?');
+    updateValues.push(now);
+    updateValues.push(userId);
+
+    const query = `UPDATE users SET ${updateFields.join(', ')} WHERE id = ?`;
+    
+    await this.db.runAsync(query, updateValues);
   }
 
   async deleteUser(userId: string): Promise<void> {
@@ -1441,6 +1697,109 @@ class DatabaseService {
       'UPDATE vehicles SET isActive = ?, updatedAt = ? WHERE id = ?',
       [isActive ? 1 : 0, now, vehicleId]
     );
+  }
+
+  // Méthode de migration pour recréer la table missions avec la nouvelle structure
+  private async recreateMissionsTable(): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    console.log('🔄 Migration critique: Recréation de la table missions');
+
+    try {
+      // 1. Sauvegarder les données existantes
+      const existingMissions = await this.db.getAllAsync<any>('SELECT * FROM missions');
+      console.log(`📋 Sauvegarde de ${existingMissions.length} missions existantes`);
+
+      // 2. Supprimer l'ancienne table
+      await this.db.execAsync('DROP TABLE IF EXISTS missions_old');
+      await this.db.execAsync('ALTER TABLE missions RENAME TO missions_old');
+
+      // 3. Créer la nouvelle table avec la structure correcte
+      await this.db.execAsync(`
+        CREATE TABLE missions (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT,
+          status TEXT NOT NULL DEFAULT 'PENDING' CHECK (status IN ('PENDING', 'ASSIGNED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED')),
+          departureLocation TEXT NOT NULL,
+          departureAddress TEXT NOT NULL,
+          departureLat REAL NOT NULL,
+          departureLng REAL NOT NULL,
+          scheduledDepartureAt TEXT NOT NULL,
+          actualDepartureAt TEXT,
+          arrivalLocation TEXT NOT NULL,
+          arrivalAddress TEXT NOT NULL,
+          arrivalLat REAL NOT NULL,
+          arrivalLng REAL NOT NULL,
+          estimatedArrivalAt TEXT NOT NULL,
+          actualArrivalAt TEXT,
+          routePolyline TEXT,
+          distance REAL,
+          estimatedDuration INTEGER,
+          maxPassengers INTEGER NOT NULL,
+          currentPassengers INTEGER NOT NULL DEFAULT 0,
+          driverId TEXT,
+          companyId TEXT NOT NULL,
+          vehicleId TEXT,
+          kmDepotStart REAL,
+          kmMissionStart REAL,
+          kmMissionEnd REAL,
+          kmDepotEnd REAL,
+          distanceDepotToDepot REAL,
+          distanceMissionOnly REAL,
+          drivingTimeMinutes INTEGER,
+          restTimeMinutes INTEGER,
+          waitingTimeMinutes INTEGER,
+          drivingTimeComment TEXT,
+          createdAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updatedAt TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY (driverId) REFERENCES users(id) ON DELETE SET NULL,
+          FOREIGN KEY (companyId) REFERENCES companies(id),
+          FOREIGN KEY (vehicleId) REFERENCES vehicles(id)
+        )
+      `);
+
+      // 4. Restaurer les données avec la nouvelle structure
+      for (const mission of existingMissions) {
+        await this.db.runAsync(`
+          INSERT INTO missions (
+            id, title, description, status, departureLocation, departureAddress,
+            departureLat, departureLng, scheduledDepartureAt, actualDepartureAt,
+            arrivalLocation, arrivalAddress, arrivalLat, arrivalLng,
+            estimatedArrivalAt, actualArrivalAt, routePolyline, distance,
+            estimatedDuration, maxPassengers, currentPassengers, driverId,
+            companyId, vehicleId, kmDepotStart, kmMissionStart, kmMissionEnd,
+            kmDepotEnd, distanceDepotToDepot, distanceMissionOnly,
+            drivingTimeMinutes, restTimeMinutes, waitingTimeMinutes,
+            drivingTimeComment, createdAt, updatedAt
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+          mission.id, mission.title, mission.description, 
+          mission.status === 'ASSIGNED' ? 'ASSIGNED' : mission.status, // Préserver le statut ASSIGNED
+          mission.departureLocation, mission.departureAddress,
+          mission.departureLat, mission.departureLng, mission.scheduledDepartureAt,
+          mission.actualDepartureAt, mission.arrivalLocation, mission.arrivalAddress,
+          mission.arrivalLat, mission.arrivalLng, mission.estimatedArrivalAt,
+          mission.actualArrivalAt, mission.routePolyline, mission.distance,
+          mission.estimatedDuration, mission.maxPassengers, mission.currentPassengers,
+          mission.driverId || null, // Permettre null pour driverId
+          mission.companyId, mission.vehicleId, mission.kmDepotStart,
+          mission.kmMissionStart, mission.kmMissionEnd, mission.kmDepotEnd,
+          mission.distanceDepotToDepot, mission.distanceMissionOnly,
+          mission.drivingTimeMinutes, mission.restTimeMinutes, mission.waitingTimeMinutes,
+          mission.drivingTimeComment, mission.createdAt, mission.updatedAt
+        ]);
+      }
+
+      // 5. Supprimer l'ancienne table
+      await this.db.execAsync('DROP TABLE missions_old');
+
+      console.log('✅ Migration réussie: Table missions recréée avec succès');
+
+    } catch (error) {
+      console.error('❌ Erreur lors de la migration de la table missions:', error);
+      throw error;
+    }
   }
 }
 
