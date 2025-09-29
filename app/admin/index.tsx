@@ -80,6 +80,14 @@ export default function AdminDashboard() {
       color: '#ef4444',
       route: '/admin/test-mission-confirmation',
     },
+    {
+      id: 'test-route-optimization',
+      title: 'Test Optimisation Itinéraire',
+      description: 'Tester l\'optimisation pour véhicules +19t',
+      icon: 'navigate-circle' as const,
+      color: '#059669',
+      route: '/admin/test-route-optimization',
+    },
   ];
 
   const handleActionPress = (route: string) => {

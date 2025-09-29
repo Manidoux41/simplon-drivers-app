@@ -23,6 +23,7 @@ import { EnhancedAddressPicker } from '../../components/EnhancedAddressPicker';
 import { IntegratedRouteMap } from '../../components/IntegratedRouteMap';
 import { databaseService, Mission } from '../../lib/database';
 import { RouteCalculationService, RouteResult } from '../../services/RouteCalculationService';
+import { heavyVehicleRouteService, OptimizedRoute, HeavyVehicleRouteOptions } from '../../services/HeavyVehicleRouteService';
 import { EnhancedRouteBuilder } from '../../components/EnhancedRouteBuilder';
 import { parseDateTime, addMinutes, validateDateBounds, formatDateTimeISO } from '../../utils/dateHelpers';
 
@@ -66,6 +67,11 @@ export default function CreateMissionScreen() {
   const [advancedWaypoints, setAdvancedWaypoints] = useState<any[]>([]);
   const [advancedRouteStats, setAdvancedRouteStats] = useState<any>(null);
 
+  // Optimisation d'itinéraire poids lourds
+  const [optimizedRoute, setOptimizedRoute] = useState<OptimizedRoute | null>(null);
+  const [isOptimizing, setIsOptimizing] = useState(false);
+  const [showOptimizedRoute, setShowOptimizedRoute] = useState(false);
+
   // Chargement
   const [creating, setCreating] = useState(false);
 
@@ -98,6 +104,93 @@ export default function CreateMissionScreen() {
   // Callback quand l'itinéraire est calculé
   const handleRouteCalculated = (route: RouteResult) => {
     setCalculatedRoute(route);
+  };
+
+  // Optimisation d'itinéraire pour poids lourds
+  const handleOptimizeRoute = async () => {
+    if (!pickupCoords || !destinationCoords) {
+      Alert.alert('Erreur', 'Veuillez sélectionner les adresses de départ et de destination');
+      return;
+    }
+
+    const selectedVehicle = vehicles.find(v => v.id === missionForm.vehicleId);
+    if (!selectedVehicle) {
+      Alert.alert('Erreur', 'Veuillez sélectionner un véhicule');
+      return;
+    }
+
+    // Vérifier si c'est un véhicule lourd
+    if (!heavyVehicleRouteService.isHeavyVehicle(selectedVehicle)) {
+      Alert.alert(
+        'Information', 
+        'L\'optimisation d\'itinéraire est spécialement conçue pour les véhicules de plus de 19 tonnes. Ce véhicule semble être plus léger.',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          { text: 'Continuer quand même', onPress: () => proceedWithOptimization(selectedVehicle) }
+        ]
+      );
+      return;
+    }
+
+    proceedWithOptimization(selectedVehicle);
+  };
+
+  const proceedWithOptimization = async (vehicle: any) => {
+    setIsOptimizing(true);
+    try {
+      const vehicleOptions = heavyVehicleRouteService.buildVehicleOptions(vehicle);
+      
+      console.log('🚛 Optimisation d\'itinéraire poids lourd:', {
+        vehicle: vehicle.licensePlate,
+        weight: vehicleOptions.weight,
+        from: missionForm.pickupLocation,
+        to: missionForm.destination
+      });
+
+      const optimized = await heavyVehicleRouteService.calculateHeavyVehicleRoute(
+        pickupCoords!,
+        destinationCoords!,
+        vehicleOptions
+      );
+
+      setOptimizedRoute(optimized);
+      setShowOptimizedRoute(true);
+
+      // Mettre à jour l'itinéraire calculé si l'optimisation a réussi
+      if (optimized && !optimized.warnings.some(w => w.includes('Service indisponible'))) {
+        // Convertir la polyline string en RoutePoint[] pour compatibilité
+        const routePoints = optimized.instructions.map(instruction => ({
+          latitude: instruction.coordinate[1],
+          longitude: instruction.coordinate[0]
+        }));
+
+        setCalculatedRoute({
+          distance: optimized.distance / 1000, // Convertir en km
+          duration: optimized.duration / 60, // Convertir en minutes
+          polyline: routePoints,
+          segments: [], // Segments vides pour l'instant
+          summary: {
+            totalDistance: `${(optimized.distance / 1000).toFixed(1)} km`,
+            totalDuration: `${Math.round(optimized.duration / 60)} min`
+          }
+        });
+      }
+
+      Alert.alert(
+        'Itinéraire optimisé',
+        `Itinéraire calculé spécialement pour votre véhicule de ${vehicleOptions.weight}t.\n\nDistance: ${(optimized.distance / 1000).toFixed(1)} km\nDurée: ${Math.round(optimized.duration / 60)} min${optimized.warnings.length > 0 ? '\n\n⚠️ Vérifiez les avertissements' : ''}`,
+        [{ text: 'OK' }]
+      );
+
+    } catch (error) {
+      console.error('Erreur lors de l\'optimisation:', error);
+      Alert.alert(
+        'Erreur d\'optimisation',
+        `Impossible d'optimiser l'itinéraire: ${error instanceof Error ? error.message : 'Erreur inconnue'}\n\nVous pouvez continuer avec un itinéraire standard.`
+      );
+    } finally {
+      setIsOptimizing(false);
+    }
   };
 
   // Gestionnaires pour le mode avancé
@@ -602,6 +695,42 @@ export default function CreateMissionScreen() {
           />
         </View>
 
+        {/* Bouton d'optimisation d'itinéraire */}
+        {missionForm.vehicleId && pickupCoords && destinationCoords && (
+          <View style={styles.section}>
+            <TouchableOpacity
+              style={[
+                styles.optimizeButton,
+                isOptimizing && styles.optimizeButtonDisabled
+              ]}
+              onPress={handleOptimizeRoute}
+              disabled={isOptimizing}
+            >
+              <Ionicons 
+                name={isOptimizing ? "hourglass" : "navigate"} 
+                size={24} 
+                color="white" 
+              />
+              <Text style={styles.optimizeButtonText}>
+                {isOptimizing ? "Optimisation..." : "Optimiser l'itinéraire (Poids Lourds)"}
+              </Text>
+            </TouchableOpacity>
+            
+            {optimizedRoute && (
+              <TouchableOpacity
+                style={styles.routeInfoButton}
+                onPress={() => setShowOptimizedRoute(true)}
+              >
+                <Ionicons name="information-circle" size={20} color={Colors.light.primary} />
+                <Text style={styles.routeInfoText}>
+                  {(optimizedRoute.distance / 1000).toFixed(1)} km • {Math.round(optimizedRoute.duration / 60)} min
+                  {optimizedRoute.warnings.length > 0 && ' • ⚠️ Avertissements'}
+                </Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
         {/* Bouton de soumission */}
         <View style={styles.submitSection}>
           <Button
@@ -637,6 +766,126 @@ export default function CreateMissionScreen() {
           initialCoordinates={destinationCoords || undefined}
           showMap={true}
         />
+      </Modal>
+
+      {/* Modal détails itinéraire optimisé */}
+      <Modal visible={showOptimizedRoute} animationType="slide" presentationStyle="pageSheet">
+        <View style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>Itinéraire Optimisé Poids Lourds</Text>
+            <TouchableOpacity
+              onPress={() => setShowOptimizedRoute(false)}
+              style={styles.modalCloseButton}
+            >
+              <Ionicons name="close" size={24} color={Colors.light.text} />
+            </TouchableOpacity>
+          </View>
+          
+          <ScrollView style={styles.modalContent}>
+            {optimizedRoute && (
+              <>
+                {/* Résumé de l'itinéraire */}
+                <View style={styles.routeSummary}>
+                  <View style={styles.routeSummaryItem}>
+                    <Ionicons name="navigate" size={20} color={Colors.light.primary} />
+                    <Text style={styles.routeSummaryText}>
+                      {(optimizedRoute.distance / 1000).toFixed(1)} km
+                    </Text>
+                  </View>
+                  <View style={styles.routeSummaryItem}>
+                    <Ionicons name="time" size={20} color={Colors.light.primary} />
+                    <Text style={styles.routeSummaryText}>
+                      {Math.round(optimizedRoute.duration / 60)} min
+                    </Text>
+                  </View>
+                  {optimizedRoute.tollInfo && (
+                    <View style={styles.routeSummaryItem}>
+                      <Ionicons name="card" size={20} color={Colors.light.warning} />
+                      <Text style={styles.routeSummaryText}>
+                        {optimizedRoute.tollInfo.totalCost.toFixed(2)} {optimizedRoute.tollInfo.currency}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Avertissements */}
+                {optimizedRoute.warnings.length > 0 && (
+                  <View style={styles.warningsSection}>
+                    <Text style={styles.warningsTitle}>⚠️ Avertissements</Text>
+                    {optimizedRoute.warnings.map((warning, index) => (
+                      <Text key={index} style={styles.warningText}>
+                        • {warning}
+                      </Text>
+                    ))}
+                  </View>
+                )}
+
+                {/* Restrictions */}
+                {optimizedRoute.restrictions.length > 0 && (
+                  <View style={styles.restrictionsSection}>
+                    <Text style={styles.restrictionsTitle}>🚫 Restrictions</Text>
+                    {optimizedRoute.restrictions.map((restriction, index) => (
+                      <View key={index} style={styles.restrictionItem}>
+                        <Text style={[
+                          styles.restrictionText,
+                          restriction.severity === 'error' && styles.restrictionError
+                        ]}>
+                          {restriction.severity === 'error' ? '🔴' : '🟡'} {restriction.description}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Instructions */}
+                {optimizedRoute.instructions.length > 0 && (
+                  <View style={styles.instructionsSection}>
+                    <Text style={styles.instructionsTitle}>📋 Instructions</Text>
+                    {optimizedRoute.instructions.slice(0, 10).map((instruction, index) => (
+                      <View key={index} style={styles.instructionItem}>
+                        <Text style={styles.instructionText}>
+                          {index + 1}. {instruction.text}
+                        </Text>
+                        <Text style={styles.instructionDistance}>
+                          {(instruction.distance / 1000).toFixed(1)} km
+                        </Text>
+                      </View>
+                    ))}
+                    {optimizedRoute.instructions.length > 10 && (
+                      <Text style={styles.moreInstructions}>
+                        ... et {optimizedRoute.instructions.length - 10} autres instructions
+                      </Text>
+                    )}
+                  </View>
+                )}
+
+                {/* Informations sur les péages */}
+                {optimizedRoute.tollInfo && optimizedRoute.tollInfo.sections.length > 0 && (
+                  <View style={styles.tollSection}>
+                    <Text style={styles.tollTitle}>💳 Péages</Text>
+                    {optimizedRoute.tollInfo.sections.map((section, index) => (
+                      <View key={index} style={styles.tollItem}>
+                        <Text style={styles.tollName}>{section.name}</Text>
+                        <Text style={styles.tollCost}>
+                          {section.cost.toFixed(2)} {optimizedRoute.tollInfo!.currency}
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </>
+            )}
+          </ScrollView>
+          
+          <View style={styles.modalActions}>
+            <TouchableOpacity
+              style={styles.modalActionButton}
+              onPress={() => setShowOptimizedRoute(false)}
+            >
+              <Text style={styles.modalActionText}>Fermer</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       </Modal>
     </View>
   );
@@ -841,5 +1090,202 @@ const styles = StyleSheet.create({
   },
   submitButton: {
     marginTop: 16,
+  },
+  optimizeButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10b981', // Vert pour l'optimisation
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 8,
+    gap: 8,
+  },
+  optimizeButtonDisabled: {
+    backgroundColor: '#9ca3af',
+  },
+  optimizeButtonText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  routeInfoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: Colors.light.surface,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+    gap: 6,
+  },
+  routeInfoText: {
+    fontSize: 14,
+    color: Colors.light.text,
+    fontWeight: '500',
+  },
+  // Styles pour la modal d'itinéraire optimisé
+  modalContainer: {
+    flex: 1,
+    backgroundColor: 'white',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.light.border,
+    backgroundColor: Colors.light.surface,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: Colors.light.text,
+  },
+  modalCloseButton: {
+    padding: 8,
+  },
+  modalContent: {
+    flex: 1,
+    paddingHorizontal: 16,
+  },
+  modalActions: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: Colors.light.border,
+  },
+  modalActionButton: {
+    backgroundColor: Colors.light.primary,
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  modalActionText: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  routeSummary: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    backgroundColor: Colors.light.surface,
+    borderRadius: 8,
+    paddingVertical: 16,
+    marginVertical: 16,
+  },
+  routeSummaryItem: {
+    alignItems: 'center',
+    gap: 4,
+  },
+  routeSummaryText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: Colors.light.text,
+  },
+  warningsSection: {
+    backgroundColor: '#fef3c7',
+    borderRadius: 8,
+    padding: 12,
+    marginVertical: 8,
+  },
+  warningsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#d97706',
+    marginBottom: 8,
+  },
+  warningText: {
+    fontSize: 14,
+    color: '#92400e',
+    marginBottom: 4,
+  },
+  restrictionsSection: {
+    backgroundColor: '#fee2e2',
+    borderRadius: 8,
+    padding: 12,
+    marginVertical: 8,
+  },
+  restrictionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#dc2626',
+    marginBottom: 8,
+  },
+  restrictionItem: {
+    marginBottom: 4,
+  },
+  restrictionText: {
+    fontSize: 14,
+    color: '#7f1d1d',
+  },
+  restrictionError: {
+    fontWeight: '600',
+  },
+  instructionsSection: {
+    marginVertical: 8,
+  },
+  instructionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: Colors.light.text,
+    marginBottom: 8,
+  },
+  instructionItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.light.divider,
+  },
+  instructionText: {
+    flex: 1,
+    fontSize: 14,
+    color: Colors.light.text,
+    marginRight: 8,
+  },
+  instructionDistance: {
+    fontSize: 12,
+    color: Colors.light.textSecondary,
+    fontWeight: '500',
+  },
+  moreInstructions: {
+    fontSize: 14,
+    color: Colors.light.textSecondary,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  tollSection: {
+    backgroundColor: '#eff6ff',
+    borderRadius: 8,
+    padding: 12,
+    marginVertical: 8,
+  },
+  tollTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#1d4ed8',
+    marginBottom: 8,
+  },
+  tollItem: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  tollName: {
+    fontSize: 14,
+    color: Colors.light.text,
+  },
+  tollCost: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1d4ed8',
   },
 });

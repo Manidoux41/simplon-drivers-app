@@ -20,6 +20,8 @@ import { RouteNavigationButtons } from '../../components/RouteNavigationButtons'
 import { MissionPdfActions } from '../../components/MissionPdfActions';
 import { KilometrageWorkflowV2 } from '../../components/KilometrageWorkflowV2';
 import { MissionTimeTracker } from '../../components/MissionTimeTracker';
+import { OptimizedRouteMap } from '../../components/OptimizedRouteMap';
+import { RouteOptimizationHelp } from '../../components/RouteOptimizationHelp';
 import { Colors } from '../../constants/Colors';
 import { DateUtils } from '../../utils/dateUtils';
 import { MapUtils } from '../../utils/mapUtils';
@@ -33,6 +35,7 @@ export default function MissionDetailScreen() {
   const [mission, setMission] = useState<Mission | null>(null);
   const [showKilometrageWorkflow, setShowKilometrageWorkflow] = useState(false);
   const [showTimeTracker, setShowTimeTracker] = useState(false);
+  const [showRouteMap, setShowRouteMap] = useState(false);
   const colors = Colors.light;
 
   useEffect(() => {
@@ -193,6 +196,19 @@ export default function MissionDetailScreen() {
               }}
               style={styles.navigationButtons}
             />
+
+            {/* Bouton pour voir l'itinéraire optimisé */}
+            {mission.departureLat && mission.departureLng && mission.arrivalLat && mission.arrivalLng && (
+              <>
+                <Button
+                  title="🗺️ Voir l'itinéraire optimisé"
+                  onPress={() => setShowRouteMap(true)}
+                  variant="outline"
+                  style={styles.routeButton}
+                />
+                <RouteOptimizationHelp style={styles.routeHelp} />
+              </>
+            )}
 
             {/* Départ */}
             <View style={styles.locationSection}>
@@ -497,6 +513,34 @@ export default function MissionDetailScreen() {
           }}
         />
 
+        {/* Modal pour l'itinéraire optimisé */}
+        <Modal
+          visible={showRouteMap}
+          animationType="slide"
+          presentationStyle="pageSheet"
+          onRequestClose={() => setShowRouteMap(false)}
+        >
+          {mission.departureLat && mission.departureLng && mission.arrivalLat && mission.arrivalLng && (
+            <OptimizedRouteMap
+              departureCoords={{
+                latitude: mission.departureLat,
+                longitude: mission.departureLng,
+              }}
+              arrivalCoords={{
+                latitude: mission.arrivalLat,
+                longitude: mission.arrivalLng,
+              }}
+              departureAddress={mission.departureAddress}
+              arrivalAddress={mission.arrivalAddress}
+              vehicle={vehicles.find(v => v.id === mission.vehicleId)}
+              onClose={() => setShowRouteMap(false)}
+              onRouteCalculated={(route) => {
+                console.log('Route calculée:', route);
+              }}
+            />
+          )}
+        </Modal>
+
         {/* Actions de statut alternatives (si pas de kilométrage actif) */}
         {(canStart || canComplete) && mission.status !== 'IN_PROGRESS' && (
           <Card variant="elevated" style={styles.section}>
@@ -673,6 +717,12 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     borderTopWidth: 1,
     borderTopColor: Colors.light.border,
+  },
+  routeButton: {
+    marginBottom: 20,
+  },
+  routeHelp: {
+    marginBottom: 20,
   },
   modalContainer: {
     flex: 1,
