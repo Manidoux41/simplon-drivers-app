@@ -15,68 +15,58 @@ import { useVehicles } from '../../hooks/useVehicles';
 import { Vehicle } from '../../lib/database';
 import { Button } from '../../components/ui/Button';
 import { Header } from '../../components/ui/Header';
+import { VehicleFormModal } from '../../components/VehicleFormModal';
 
 export default function VehiclesManagement() {
   const router = useRouter();
-  const { vehicles, loading, error, createVehicle, updateVehicleMileage, updateVehicleStatus } = useVehicles();
+  const { vehicles, loading, error, createVehicle, updateVehicleMileage, updateVehicleStatus, updateVehicle, deleteVehicle } = useVehicles();
   
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [formData, setFormData] = useState({
-    brand: '',
-    model: '',
-    licensePlate: '',
-    fleetNumber: '',
-    mileage: '',
-    vin: '',
-    firstRegistration: '',
-    enginePower: '',
-    fuelType: 'DIESEL' as 'DIESEL' | 'ESSENCE' | 'ELECTRIQUE' | 'HYBRIDE',
-    seats: '',
-    category: 'M3',
-  });
+  const [showModal, setShowModal] = useState(false);
+  const [editingVehicle, setEditingVehicle] = useState<Vehicle | null>(null);
 
-  const handleCreateVehicle = async () => {
-    if (!formData.brand || !formData.model || !formData.licensePlate || 
-        !formData.fleetNumber || !formData.vin || !formData.firstRegistration ||
-        !formData.enginePower || !formData.seats) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
-      return;
-    }
+  // Fonctions pour les modals
+  const handleCreateVehicle = () => {
+    setEditingVehicle(null);
+    setShowModal(true);
+  };
 
-    const vehicleData = {
-      brand: formData.brand,
-      model: formData.model,
-      licensePlate: formData.licensePlate.toUpperCase(),
-      fleetNumber: formData.fleetNumber.toUpperCase(),
-      mileage: parseInt(formData.mileage) || 0,
-      registrationDocument: {
-        vin: formData.vin.toUpperCase(),
-        firstRegistration: formData.firstRegistration,
-        enginePower: parseInt(formData.enginePower),
-        fuelType: formData.fuelType,
-        seats: parseInt(formData.seats),
-        category: formData.category,
+  const handleEditVehicle = (vehicle: Vehicle) => {
+    setEditingVehicle(vehicle);
+    setShowModal(true);
+  };
+
+  const handleSubmitVehicle = async (vehicleData: any) => {
+    try {
+      if (editingVehicle) {
+        // Mode édition
+        return await updateVehicle(editingVehicle.id, vehicleData);
+      } else {
+        // Mode création
+        return await createVehicle(vehicleData);
       }
-    };
-
-    const success = await createVehicle(vehicleData);
-    if (success) {
-      Alert.alert('Succès', 'Véhicule créé avec succès');
-      setFormData({
-        brand: '',
-        model: '',
-        licensePlate: '',
-        fleetNumber: '',
-        mileage: '',
-        vin: '',
-        firstRegistration: '',
-        enginePower: '',
-        fuelType: 'DIESEL',
-        seats: '',
-        category: 'M3',
-      });
-      setShowCreateForm(false);
+    } catch (error) {
+      return false;
     }
+  };
+
+  const handleDeleteVehicle = (vehicle: Vehicle) => {
+    Alert.alert(
+      'Supprimer le véhicule',
+      `Êtes-vous sûr de vouloir supprimer le véhicule ${vehicle.fleetNumber} (${vehicle.licensePlate}) ?\n\nCette action est irréversible.`,
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { 
+          text: 'Supprimer', 
+          style: 'destructive',
+          onPress: async () => {
+            const success = await deleteVehicle(vehicle.id);
+            if (success) {
+              Alert.alert('Succès', 'Véhicule supprimé avec succès');
+            }
+          }
+        }
+      ]
+    );
   };
 
   const handleToggleStatus = (vehicle: Vehicle) => {
@@ -171,141 +161,16 @@ export default function VehiclesManagement() {
             <Text style={[styles.testText, { color: Colors.light.primary }]}>Test Cartes</Text>
           </TouchableOpacity>
           <TouchableOpacity 
-            onPress={() => setShowCreateForm(!showCreateForm)}
+            onPress={handleCreateVehicle}
             style={styles.addButton}
           >
-            <Ionicons name="add" size={24} color={Colors.light.primary} />
-            <Text style={[styles.addText, { color: Colors.light.primary }]}>Ajouter</Text>
+            <Ionicons name="add" size={24} color="white" />
+            <Text style={styles.addText}>Ajouter véhicule</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView style={styles.scrollView}>
-        {/* Formulaire de création */}
-        {showCreateForm && (
-          <View style={styles.createForm}>
-            <Text style={styles.formTitle}>Ajouter un nouveau véhicule</Text>
-            
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Marque *"
-                value={formData.brand}
-                onChangeText={(text) => setFormData({ ...formData, brand: text })}
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Modèle *"
-                value={formData.model}
-                onChangeText={(text) => setFormData({ ...formData, model: text })}
-              />
-            </View>
-            
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Immatriculation * (ex: AB-123-CD)"
-                value={formData.licensePlate}
-                onChangeText={(text) => setFormData({ ...formData, licensePlate: text })}
-                autoCapitalize="characters"
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="N° Parc * (ex: CS001)"
-                value={formData.fleetNumber}
-                onChangeText={(text) => setFormData({ ...formData, fleetNumber: text })}
-                autoCapitalize="characters"
-              />
-            </View>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Kilométrage initial"
-              value={formData.mileage}
-              onChangeText={(text) => setFormData({ ...formData, mileage: text })}
-              keyboardType="numeric"
-            />
-
-            <Text style={styles.sectionTitle}>Informations carte grise</Text>
-            
-            <TextInput
-              style={styles.input}
-              placeholder="Numéro de châssis (VIN) *"
-              value={formData.vin}
-              onChangeText={(text) => setFormData({ ...formData, vin: text })}
-              autoCapitalize="characters"
-            />
-            
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Date 1ère immat. * (AAAA-MM-JJ)"
-                value={formData.firstRegistration}
-                onChangeText={(text) => setFormData({ ...formData, firstRegistration: text })}
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Puissance (CV) *"
-                value={formData.enginePower}
-                onChangeText={(text) => setFormData({ ...formData, enginePower: text })}
-                keyboardType="numeric"
-              />
-            </View>
-
-            <View style={styles.row}>
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Nombre de places *"
-                value={formData.seats}
-                onChangeText={(text) => setFormData({ ...formData, seats: text })}
-                keyboardType="numeric"
-              />
-              <TextInput
-                style={[styles.input, styles.halfInput]}
-                placeholder="Catégorie (ex: M3)"
-                value={formData.category}
-                onChangeText={(text) => setFormData({ ...formData, category: text })}
-              />
-            </View>
-
-            {/* Sélection du carburant */}
-            <Text style={styles.fuelLabel}>Type de carburant :</Text>
-            <View style={styles.fuelSelector}>
-              {(['DIESEL', 'ESSENCE', 'ELECTRIQUE', 'HYBRIDE'] as const).map((fuel) => (
-                <TouchableOpacity
-                  key={fuel}
-                  style={[
-                    styles.fuelButton,
-                    formData.fuelType === fuel && styles.fuelButtonActive
-                  ]}
-                  onPress={() => setFormData({ ...formData, fuelType: fuel })}
-                >
-                  <Text style={[
-                    styles.fuelButtonText,
-                    formData.fuelType === fuel && styles.fuelButtonTextActive
-                  ]}>
-                    {fuel}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <View style={styles.formButtons}>
-              <Button
-                title="Annuler"
-                onPress={() => setShowCreateForm(false)}
-                variant="ghost"
-                style={styles.cancelButton}
-              />
-              <Button
-                title="Créer"
-                onPress={handleCreateVehicle}
-                style={styles.createButton}
-              />
-            </View>
-          </View>
-        )}
-
         {/* Liste des véhicules */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>
@@ -363,11 +228,42 @@ export default function VehiclesManagement() {
                     color={vehicle.isActive ? "#f59e0b" : "#10b981"} 
                   />
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleEditVehicle(vehicle)}
+                >
+                  <Ionicons name="create" size={20} color="#3b82f6" />
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={styles.actionButton}
+                  onPress={() => handleDeleteVehicle(vehicle)}
+                >
+                  <Ionicons name="trash" size={20} color="#ef4444" />
+                </TouchableOpacity>
               </View>
             </View>
           ))}
         </View>
       </ScrollView>
+
+      {/* Bouton flottant pour ajouter un véhicule */}
+      <TouchableOpacity 
+        onPress={handleCreateVehicle}
+        style={styles.floatingButton}
+      >
+        <Ionicons name="add" size={28} color="white" />
+      </TouchableOpacity>
+
+      {/* Modal pour créer/modifier un véhicule */}
+      <VehicleFormModal
+        visible={showModal}
+        onClose={() => setShowModal(false)}
+        onSubmit={handleSubmitVehicle}
+        vehicle={editingVehicle}
+        title={editingVehicle ? 'Modifier le véhicule' : 'Ajouter un véhicule'}
+      />
     </View>
   );
 }
@@ -409,12 +305,20 @@ const styles = StyleSheet.create({
   addButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 8,
+    padding: 12,
+    backgroundColor: Colors.light.primary,
+    borderRadius: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   addText: {
     marginLeft: 8,
     fontSize: 16,
     fontWeight: '600',
+    color: 'white',
   },
   scrollView: {
     flex: 1,
@@ -578,5 +482,21 @@ const styles = StyleSheet.create({
     marginLeft: 4,
     fontSize: 14,
     fontWeight: '500',
+  },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: Colors.light.primary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
   },
 });

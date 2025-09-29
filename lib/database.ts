@@ -1699,6 +1699,108 @@ class DatabaseService {
     );
   }
 
+  async updateVehicle(vehicleId: string, vehicleData: {
+    brand?: string;
+    model?: string;
+    licensePlate?: string;
+    fleetNumber?: string;
+    mileage?: number;
+    registrationDocument?: {
+      vin?: string;
+      firstRegistration?: string;
+      enginePower?: number;
+      fuelType?: 'DIESEL' | 'ESSENCE' | 'ELECTRIQUE' | 'HYBRIDE';
+      seats?: number;
+      category?: string;
+    };
+  }): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    const now = new Date().toISOString();
+    const updates: string[] = [];
+    const values: any[] = [];
+
+    // Construire dynamiquement la requête UPDATE
+    if (vehicleData.brand) {
+      updates.push('brand = ?');
+      values.push(vehicleData.brand);
+    }
+    if (vehicleData.model) {
+      updates.push('model = ?');
+      values.push(vehicleData.model);
+    }
+    if (vehicleData.licensePlate) {
+      updates.push('licensePlate = ?');
+      values.push(vehicleData.licensePlate.toUpperCase());
+    }
+    if (vehicleData.fleetNumber) {
+      updates.push('fleetNumber = ?');
+      values.push(vehicleData.fleetNumber.toUpperCase());
+    }
+    if (vehicleData.mileage !== undefined) {
+      updates.push('mileage = ?');
+      values.push(vehicleData.mileage);
+    }
+
+    // Gérer les champs du document d'immatriculation
+    if (vehicleData.registrationDocument) {
+      const reg = vehicleData.registrationDocument;
+      if (reg.vin) {
+        updates.push('vin = ?');
+        values.push(reg.vin.toUpperCase());
+      }
+      if (reg.firstRegistration) {
+        updates.push('firstRegistration = ?');
+        values.push(reg.firstRegistration);
+      }
+      if (reg.enginePower !== undefined) {
+        updates.push('enginePower = ?');
+        values.push(reg.enginePower);
+      }
+      if (reg.fuelType) {
+        updates.push('fuelType = ?');
+        values.push(reg.fuelType);
+      }
+      if (reg.seats !== undefined) {
+        updates.push('seats = ?');
+        values.push(reg.seats);
+      }
+      if (reg.category) {
+        updates.push('category = ?');
+        values.push(reg.category);
+      }
+    }
+
+    if (updates.length === 0) {
+      throw new Error('Aucune donnée à mettre à jour');
+    }
+
+    // Ajouter updatedAt
+    updates.push('updatedAt = ?');
+    values.push(now);
+    values.push(vehicleId);
+
+    const sql = `UPDATE vehicles SET ${updates.join(', ')} WHERE id = ?`;
+    await this.db.runAsync(sql, values);
+  }
+
+  async deleteVehicle(vehicleId: string): Promise<void> {
+    if (!this.db) throw new Error('Base de données non initialisée');
+
+    // Vérifier si le véhicule est utilisé dans des missions actives
+    const activeMissions = await this.db.getAllAsync(
+      'SELECT id FROM missions WHERE vehicleId = ? AND status IN (?, ?, ?)',
+      [vehicleId, 'PENDING', 'ASSIGNED', 'IN_PROGRESS']
+    );
+
+    if (activeMissions.length > 0) {
+      throw new Error('Impossible de supprimer ce véhicule : il est assigné à des missions actives');
+    }
+
+    // Supprimer le véhicule
+    await this.db.runAsync('DELETE FROM vehicles WHERE id = ?', [vehicleId]);
+  }
+
   // Méthode de migration pour recréer la table missions avec la nouvelle structure
   private async recreateMissionsTable(): Promise<void> {
     if (!this.db) throw new Error('Base de données non initialisée');

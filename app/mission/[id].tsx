@@ -35,7 +35,6 @@ export default function MissionDetailScreen() {
   const [mission, setMission] = useState<Mission | null>(null);
   const [showKilometrageWorkflow, setShowKilometrageWorkflow] = useState(false);
   const [showTimeTracker, setShowTimeTracker] = useState(false);
-  const [showRouteMap, setShowRouteMap] = useState(false);
   const colors = Colors.light;
 
   useEffect(() => {
@@ -197,17 +196,79 @@ export default function MissionDetailScreen() {
               style={styles.navigationButtons}
             />
 
-            {/* Bouton pour voir l'itinéraire optimisé */}
+            {/* Section Itinéraires - Optimisé en priorité */}
             {mission.departureLat && mission.departureLng && mission.arrivalLat && mission.arrivalLng && (
-              <>
-                <Button
-                  title="🗺️ Voir l'itinéraire optimisé"
-                  onPress={() => setShowRouteMap(true)}
-                  variant="outline"
-                  style={styles.routeButton}
-                />
-                <RouteOptimizationHelp style={styles.routeHelp} />
-              </>
+              <View style={styles.routesSection}>
+                {/* Itinéraire optimisé en priorité */}
+                <View style={styles.routeItem}>
+                  <Text style={[styles.routeTitle, { color: colors.text }]}>
+                    🚛 Itinéraire optimisé (Recommandé)
+                  </Text>
+                  <Text style={[styles.routeDescription, { color: colors.textSecondary }]}>
+                    Calculé selon votre véhicule et les restrictions de circulation
+                  </Text>
+                  <RouteOptimizationHelp style={styles.routeHelp} />
+                  
+                  {/* Carte optimisée intégrée directement */}
+                  <View style={styles.optimizedMapContainer}>
+                    <OptimizedRouteMap
+                      departureCoords={{
+                        latitude: mission.departureLat,
+                        longitude: mission.departureLng,
+                      }}
+                      arrivalCoords={{
+                        latitude: mission.arrivalLat,
+                        longitude: mission.arrivalLng,
+                      }}
+                      departureAddress={mission.departureAddress}
+                      arrivalAddress={mission.arrivalAddress}
+                      vehicle={vehicles.find(v => v.id === mission.vehicleId)}
+                      onRouteCalculated={(route) => {
+                        console.log('Route calculée:', route);
+                      }}
+                    />
+                  </View>
+                </View>
+
+                {/* Itinéraire OpenStreetMap standard */}
+                <View style={styles.routeItem}>
+                  <Text style={[styles.routeTitle, { color: colors.text }]}>
+                    🌍 Itinéraire OpenStreetMap
+                  </Text>
+                  <Text style={[styles.routeDescription, { color: colors.textSecondary }]}>
+                    Aperçu cartographique standard avec options de navigation
+                  </Text>
+                  <RouteMap
+                    departureLocation={{
+                      latitude: mission.departureLat,
+                      longitude: mission.departureLng,
+                      title: mission.departureLocation,
+                      address: mission.departureAddress
+                    }}
+                    arrivalLocation={{
+                      latitude: mission.arrivalLat,
+                      longitude: mission.arrivalLng,
+                      title: mission.arrivalLocation,
+                      address: mission.arrivalAddress
+                    }}
+                    height={250}
+                    style={styles.routeMapContainer}
+                  />
+                  <RouteNavigationButtons
+                    departureLocation={{
+                      latitude: mission.departureLat,
+                      longitude: mission.departureLng,
+                      address: mission.departureAddress
+                    }}
+                    arrivalLocation={{
+                      latitude: mission.arrivalLat,
+                      longitude: mission.arrivalLng,
+                      address: mission.arrivalAddress
+                    }}
+                    style={styles.routeNavButtons}
+                  />
+                </View>
+              </View>
             )}
 
             {/* Départ */}
@@ -513,34 +574,6 @@ export default function MissionDetailScreen() {
           }}
         />
 
-        {/* Modal pour l'itinéraire optimisé */}
-        <Modal
-          visible={showRouteMap}
-          animationType="slide"
-          presentationStyle="pageSheet"
-          onRequestClose={() => setShowRouteMap(false)}
-        >
-          {mission.departureLat && mission.departureLng && mission.arrivalLat && mission.arrivalLng && (
-            <OptimizedRouteMap
-              departureCoords={{
-                latitude: mission.departureLat,
-                longitude: mission.departureLng,
-              }}
-              arrivalCoords={{
-                latitude: mission.arrivalLat,
-                longitude: mission.arrivalLng,
-              }}
-              departureAddress={mission.departureAddress}
-              arrivalAddress={mission.arrivalAddress}
-              vehicle={vehicles.find(v => v.id === mission.vehicleId)}
-              onClose={() => setShowRouteMap(false)}
-              onRouteCalculated={(route) => {
-                console.log('Route calculée:', route);
-              }}
-            />
-          )}
-        </Modal>
-
         {/* Actions de statut alternatives (si pas de kilométrage actif) */}
         {(canStart || canComplete) && mission.status !== 'IN_PROGRESS' && (
           <Card variant="elevated" style={styles.section}>
@@ -712,7 +745,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     marginBottom: 8,
   },
-  navigationButtons: {
+  navigationButtonsContainer: {
     marginBottom: 20,
     paddingTop: 16,
     borderTopWidth: 1,
@@ -807,5 +840,45 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  routesSection: {
+    marginBottom: 20,
+  },
+  routeItem: {
+    marginBottom: 16,
+    padding: 16,
+    backgroundColor: 'white',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+  },
+  routeTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  routeDescription: {
+    fontSize: 14,
+    marginBottom: 12,
+    lineHeight: 20,
+  },
+  routeMapContainer: {
+    marginBottom: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  navigationButtons: {
+    marginTop: 8,
+  },
+  routeNavButtons: {
+    marginTop: 8,
+  },
+  optimizedMapContainer: {
+    height: 300,
+    marginTop: 12,
+    borderRadius: 8,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: Colors.light.border,
   },
 });

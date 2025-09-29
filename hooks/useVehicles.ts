@@ -71,6 +71,42 @@ export function useVehicles() {
     }
   };
 
+  const updateVehicle = async (vehicleId: string, vehicleData: {
+    brand?: string;
+    model?: string;
+    licensePlate?: string;
+    fleetNumber?: string;
+    mileage?: number;
+    registrationDocument?: {
+      vin?: string;
+      firstRegistration?: string;
+      enginePower?: number;
+      fuelType?: 'DIESEL' | 'ESSENCE' | 'ELECTRIQUE' | 'HYBRIDE';
+      seats?: number;
+      category?: string;
+    };
+  }) => {
+    try {
+      await databaseService.updateVehicle(vehicleId, vehicleData);
+      await loadVehicles(); // Recharger la liste
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur lors de la mise à jour du véhicule');
+      return false;
+    }
+  };
+
+  const deleteVehicle = async (vehicleId: string) => {
+    try {
+      await databaseService.deleteVehicle(vehicleId);
+      await loadVehicles(); // Recharger la liste
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Erreur lors de la suppression du véhicule');
+      return false;
+    }
+  };
+
   useEffect(() => {
     loadVehicles();
   }, []);
@@ -84,5 +120,7 @@ export function useVehicles() {
     createVehicle,
     updateVehicleMileage,
     updateVehicleStatus,
+    updateVehicle,
+    deleteVehicle,
   };
 }

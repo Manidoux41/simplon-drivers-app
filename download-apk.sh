@@ -2,9 +2,12 @@
 
 # Script de téléchargement APK Simplon Drivers
 # Usage: ./download-apk.sh
+# Dernière génération: 29 septembre 2025
 
 echo "📱 Téléchargement APK Simplon Drivers"
 echo "===================================="
+echo "🎯 Build récent disponible: 2b7669c3-f0f1-4fdb-9795-70e103b74da1"
+echo "🔗 Lien direct: https://expo.dev/accounts/superflyman90/projects/simplon-drivers-app/builds/2b7669c3-f0f1-4fdb-9795-70e103b74da1"
 echo ""
 
 # Fonction pour lister les builds APK
